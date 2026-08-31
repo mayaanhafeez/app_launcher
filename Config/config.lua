@@ -142,6 +142,20 @@ end
 return {
   hotkey = { key = "space", mods = { "option" } },
 
+  -- The row that leaves a submenu. It is never shown at root, is skipped when the
+  -- selection lands on the first row, and survives every query. `back = false`
+  -- removes it; `position` is "top" or "bottom".
+  back = { enabled = true, label = "Back", symbol = "chevron.left", position = "top" },
+
+  -- Positional shortcuts for whatever the list is showing: the nth key activates
+  -- the nth row, with the back row skipped so the numbering matches the items.
+  -- `shortcuts = false` removes them; `mods` takes the same names as `hotkey.mods`.
+  shortcuts = {
+    enabled = true,
+    mods = { "command" },
+    keys = { "1", "2", "3", "4", "5", "6", "7", "8", "9", "0" },
+  },
+
   -- Modal navigation, off by default. When on, the panel opens in NORMAL mode:
   --   j / k      move down / up          / or s   clear the query and start typing
   --   i          resume typing           a        append at the end of the query

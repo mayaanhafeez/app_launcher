@@ -2,6 +2,34 @@ import AppKit
 import Carbon
 import Darwin
 
+/// The only persistent UI outside the panel. The app is an accessory (`LSUIElement`),
+/// so without this there is no way to reach the config, force a reload, or quit
+/// except `orbitctl` and `kill`.
+@MainActor
+final class MenuBarItem {
+    private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    var onOpenConfig: (() -> Void)?
+    var onReload: (() -> Void)?
+
+    init(symbol: String = "circle.dashed") {
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Orbit")
+        image?.isTemplate = true   // so it tracks the menu bar's light/dark appearance
+        item.button?.image = image
+        item.button?.toolTip = "Orbit"
+
+        let menu = NSMenu()
+        menu.addItem(withTitle: "Open Config Folder", action: #selector(openConfig), keyEquivalent: ",").target = self
+        menu.addItem(withTitle: "Reload Config", action: #selector(reload), keyEquivalent: "r").target = self
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Quit Orbit", action: #selector(quit), keyEquivalent: "q").target = self
+        item.menu = menu
+    }
+
+    @objc private func openConfig() { onOpenConfig?() }
+    @objc private func reload() { onReload?() }
+    @objc private func quit() { NSApp.terminate(nil) }
+}
+
 @MainActor
 final class GlobalHotKey {
     private var reference: EventHotKeyRef?

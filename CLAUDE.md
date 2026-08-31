@@ -74,6 +74,12 @@ AppIndex ──onChange──▶ MenuController
   "act on what I typed" has to come from a provider, whose rows are appended post-filter.
 - Provider rows carry their `ScriptAction` inline on `DisplayRow.action` because they have no
   backing `MenuNode` to look up. `activate` checks that before the node lookup.
+- **The back row is synthetic.** `decorated(_:)` adds it at every emission point rather than merging it into
+  `candidates`: a static row would go through the fuzzy filter and vanish on the first keystroke, and adding it late is
+  also what keeps `position = "bottom"` below the provider rows, which arrive after the base list. It is never shown at
+  `root`, and `PanelController.update` skips `kind == .back` when picking the initial selection so Return on a fresh
+  submenu never walks straight back out. Configured by `back = { enabled, label, symbol, detail, position }` (or
+  `back = false`) in `config.lua`, carried on `Settings`.
 - `back()` pops an explicit `navigation` stack rather than walking `parent`, so Escape retraces how the user arrived.
   It returns `false` at root, which is `PanelController`'s cue to hide the panel instead.
 
@@ -147,6 +153,16 @@ detail visibility needs a matching `noteHeightOfRows` call. `RowView` centres it
 `selectionBackground` rather than pinning to the top, which is what keeps single-line rows aligned
 with their icon.
 
+### List shortcuts
+
+`ShortcutSpec` (`Models.swift`) is positional, not per-item: the nth key activates the nth row of whatever the list is
+currently showing, so it needs no ids and keeps working over search results and provider rows. Like `VimKeys` it is a
+pure function of characters plus modifiers, so it is testable without a window. `PanelController.activate(position:)`
+filters out `kind == .back` before indexing, which is what keeps ⌘1 on the first real item with the back row at either
+end, and it swallows a key past the end of the list rather than letting it reach the field. Dispatch is
+`performKeyEquivalent` → `routeKey`, which works here precisely because these are modified keys — the reason plain keys
+need the vim-mode event monitor instead. Configured by `shortcuts = { enabled, mods, keys }` (or `shortcuts = false`).
+
 ### Vim mode
 
 Off unless `vim = true`; every code path is gated on `PanelController.vimEnabled`, so the
@@ -169,6 +185,13 @@ mode it is passed through to the existing `cancelOperation:` path so clear/back/
 unchanged. `controlTextDidChange` flips to insert as a safety net, because a dead key or IME
 commit can reach the field without passing the monitor and the indicator must never claim
 NORMAL while the field is editing.
+
+### Menu bar
+
+`MenuBarItem` (`SystemServices.swift`) is the only persistent UI outside the panel: an `NSStatusItem` with Open Config
+Folder / Reload Config / Quit. The app is `LSUIElement`, so without it the only ways to reload or quit are `orbitctl`
+and `kill`. "Open Config Folder" creates `~/.config/orbit` first — opening a path that doesn't exist does nothing at
+all.
 
 ### IPC
 

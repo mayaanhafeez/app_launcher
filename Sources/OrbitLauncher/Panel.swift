@@ -13,13 +13,34 @@ final class LauncherField: NSTextField {
     }
 }
 
+/// Hover selection rides on `mouseMoved` alone. An enter/exit pair also fires when
+/// the list is rebuilt or scrolled under a stationary pointer, and acting on those
+/// would let a stale cursor position snatch the selection back from the keyboard;
+/// only genuine movement means the mouse is the input device in use.
+final class LauncherTable: NSTableView {
+    var onHover: ((Int) -> Void)?
+    private var hoverArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeAlways, .inVisibleRect], owner: self)
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        onHover?(row(at: convert(event.locationInWindow, from: nil)))
+    }
+}
+
 @MainActor
 final class PanelController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
     private let blur = NSVisualEffectView()
     private let card = NSView()
-    private let prompt = NSTextField(labelWithString: "Go...")
     private let input = LauncherField()
-    private let table = NSTableView()
+    private let table = LauncherTable()
     private let scroll = NSScrollView()
     private let notice = NSTextField(wrappingLabelWithString: "")
     private let modeLabel = NSTextField(labelWithString: "NORMAL")
@@ -53,6 +74,8 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
             refreshModeIndicator()
         }
     }
+    /// Positional list shortcuts, republished on every config reload.
+    var shortcuts = ShortcutSpec()
     private var mode: InputMode = .normal
     /// Held for the process lifetime: the panel controller is owned by the app
     /// delegate and outlives every other object, so there is nothing to tear down.
@@ -73,6 +96,7 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = true
+        panel.acceptsMouseMovedEvents = true
         super.init(window: panel)
         buildUI(panel)
         apply(theme: theme)
@@ -134,7 +158,13 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
         resizeToContent()
         emptyLabel.isHidden = !rows.isEmpty
         if rows.isEmpty { table.deselectAll(nil) }
-        else { table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false); table.scrollRowToVisible(0) }
+        else {
+            // Never land on the back row: Return on a freshly opened submenu has to
+            // activate something in it, not walk straight back out.
+            let first = rows.firstIndex { $0.kind != .back } ?? 0
+            table.selectRowIndexes(IndexSet(integer: first), byExtendingSelection: false)
+            table.scrollRowToVisible(first)
+        }
         repaintSelection()
     }
 
@@ -148,6 +178,9 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
         self.theme = theme
         blur.material = theme.blur > 0.66 ? .hudWindow : (theme.blur > 0.33 ? .menu : .windowBackground)
         blur.alphaValue = theme.blur <= 0 ? 0 : 1
+        // The effect view fills the whole window, so without a mask its square material
+        // stays visible in the four corners the card rounds away.
+        blur.maskImage = Self.roundedMask(radius: theme.radius)
 
         card.layer?.backgroundColor = theme.cardBackground.cgColor
         card.layer?.cornerRadius = theme.radius
@@ -156,8 +189,6 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
         card.layer?.borderColor = theme.borderColor.cgColor
 
         let headingFont = theme.font(size: theme.headingSize, weight: theme.labelWeight)
-        prompt.textColor = theme.fgMuted
-        prompt.font = headingFont
         input.textColor = theme.fg
         input.font = headingFont
 
@@ -191,6 +222,7 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
         table.intercellSpacing = NSSize(width: 0, height: theme.space(theme.rowGap))
         table.rowHeight = theme.rowHeight(hasDetail: false)
         table.reloadData()
+        updatePrompt()
         resizeToContent()
     }
 
@@ -214,6 +246,22 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
             y: (visible.midY - height / 2 + theme.offsetY).rounded()
         )
         panel.setFrame(NSRect(origin: origin, size: NSSize(width: width, height: height)), display: true)
+        // The shadow is derived from the masked content, so it has to be recomputed
+        // whenever the card resizes or it keeps the previous outline.
+        panel.invalidateShadow()
+    }
+
+    /// A resizable rounded-rect mask: the centre stretches, the corners don't.
+    private static func roundedMask(radius: CGFloat) -> NSImage {
+        let edge = radius * 2 + 1
+        let image = NSImage(size: NSSize(width: edge, height: edge), flipped: false) { rect in
+            NSColor.black.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+            return true
+        }
+        image.capInsets = NSEdgeInsets(top: radius, left: radius, bottom: radius, right: radius)
+        image.resizingMode = .stretch
+        return image
     }
 
     private func contentHeight() -> CGFloat {
@@ -290,6 +338,12 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
     }
 
     private func routeKey(_ event: NSEvent) -> Bool {
+        // Shortcuts are modified keys, so `performKeyEquivalent` does deliver them and
+        // this runs before the plain-key cases below can claim one.
+        if let position = shortcuts.position(for: event.charactersIgnoringModifiers ?? "",
+                                             modifiers: event.modifierFlags) {
+            return activate(position: position)
+        }
         switch event.keyCode {
         case 53: escape(); return true
         case 125: moveSelection(1); return true
@@ -369,13 +423,32 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
         table.scrollRowToVisible(next)
     }
 
+    /// Positional shortcuts count the rows the user can act on, so the back row —
+    /// chrome rather than an item — is skipped and the first key stays on the first
+    /// real row whichever end the back row sits at. A key past the end of the list is
+    /// still swallowed: it is a shortcut the user pressed, not text for the field.
+    private func activate(position: Int) -> Bool {
+        let actionable = rows.indices.filter { rows[$0].kind != .back }
+        guard actionable.indices.contains(position) else { return true }
+        let index = actionable[position]
+        table.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
+        onActivate?(rows[index])
+        return true
+    }
+
     private func activateSelection() {
         let index = table.selectedRow < 0 ? 0 : table.selectedRow
         if rows.indices.contains(index) { onActivate?(rows[index]) }
     }
 
+    /// The prompt is the field's own placeholder rather than a label laid over the
+    /// field: a label can only approximate the field editor's text origin, and the
+    /// couple of points it was off by showed up as the caret sitting inside the "G".
     private func updatePrompt() {
-        prompt.stringValue = input.stringValue.isEmpty ? "\(title)..." : ""
+        input.placeholderAttributedString = NSAttributedString(
+            string: "\(title)...",
+            attributes: [.font: input.font as Any, .foregroundColor: theme.fgMuted]
+        )
         if !rows.isEmpty { table.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<rows.count)) }
     }
 
@@ -386,7 +459,7 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
         blur.wantsLayer = true
         card.wantsLayer = true
         [card].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; blur.addSubview($0) }
-        [prompt, input, scroll, emptyLabel, notice, modeLabel].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; card.addSubview($0) }
+        [input, scroll, emptyLabel, notice, modeLabel].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; card.addSubview($0) }
 
         input.isBordered = false
         input.isBezeled = false
@@ -395,7 +468,6 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
         input.delegate = self
         input.cell?.isScrollable = true
         input.routeKey = { [weak self] event in self?.routeKey(event) ?? false }
-        prompt.lineBreakMode = .byTruncatingTail
 
         table.headerView = nil
         table.backgroundColor = .clear
@@ -407,7 +479,8 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
         column.resizingMask = .autoresizingMask
         table.addTableColumn(column)
         table.target = self
-        table.doubleAction = #selector(doubleClick)
+        table.action = #selector(click)
+        table.onHover = { [weak self] row in self?.hover(row: row) }
         scroll.documentView = table
         scroll.hasVerticalScroller = false
         scroll.drawsBackground = false
@@ -441,7 +514,6 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
             card.leadingAnchor.constraint(equalTo: blur.leadingAnchor), card.trailingAnchor.constraint(equalTo: blur.trailingAnchor),
             card.topAnchor.constraint(equalTo: blur.topAnchor), card.bottomAnchor.constraint(equalTo: blur.bottomAnchor),
             inputTop, inputLeading, inputTrailing, inputHeight,
-            prompt.leadingAnchor.constraint(equalTo: input.leadingAnchor), prompt.trailingAnchor.constraint(equalTo: input.trailingAnchor), prompt.centerYAnchor.constraint(equalTo: input.centerYAnchor),
             scrollTop, scrollLeading, scrollTrailing, scrollBottom,
             emptyLabel.centerXAnchor.constraint(equalTo: card.centerXAnchor), emptyLabel.centerYAnchor.constraint(equalTo: scroll.centerYAnchor),
             modeTrailing, modeWidth, modeLabel.centerYAnchor.constraint(equalTo: input.centerYAnchor),
@@ -450,7 +522,17 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
         ])
     }
 
-    @objc private func doubleClick() { if rows.indices.contains(table.clickedRow) { onActivate?(rows[table.clickedRow]) } }
+    /// Single click activates: the panel is a menu, and a menu opens on one click.
+    @objc private func click() {
+        guard rows.indices.contains(table.clickedRow) else { return }
+        onActivate?(rows[table.clickedRow])
+    }
+
+    /// Hover and the arrow keys drive the same single cursor — whichever moved last wins.
+    private func hover(row index: Int) {
+        guard rows.indices.contains(index), index != table.selectedRow else { return }
+        table.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
+    }
 }
 
 final class RowView: NSTableCellView {

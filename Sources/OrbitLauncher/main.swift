@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var watcher: ConfigWatcher?
     private var themePointerWatcher: ConfigWatcher?
     private var ipc: IPCServer?
+    private var menuBar: MenuBarItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -24,12 +25,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.hotKey = hotKey
         startWatcher()
         startIPC()
+        startMenuBar()
     }
 
     private func wireUI() {
         runtime.onSettings = { [weak self] settings in
             guard let self else { return }
             panel.vimEnabled = settings.vimMode
+            menu.backRow = settings.back
+            panel.shortcuts = settings.shortcuts
             if hotKey?.register(settings.hotKey) == false {
                 panel.showNotice("Unknown hotkey: \(settings.hotKey.key)")
             }
@@ -70,6 +74,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func reloadChangedFiles() {
         runtime.load(file: configDirectory.appendingPathComponent("config.lua"))
         reloadTheme()
+    }
+
+    private func startMenuBar() {
+        let menuBar = MenuBarItem()
+        menuBar.onOpenConfig = { [weak self] in self?.openConfigDirectory() }
+        menuBar.onReload = { [weak self] in self?.reloadAll() }
+        self.menuBar = menuBar
+    }
+
+    /// A fresh install has no `~/.config/orbit` until the templates are copied, and
+    /// opening a path that isn't there does nothing at all, so create it first.
+    private func openConfigDirectory() {
+        panel.hide()
+        try? FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(configDirectory)
     }
 
     private func startIPC() {

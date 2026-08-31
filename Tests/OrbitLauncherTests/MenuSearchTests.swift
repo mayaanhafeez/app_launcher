@@ -14,7 +14,8 @@ import Testing
     controller.onRows = { _, rows in labels = rows.map(\.label) }
     controller.open(route: "dev")
     controller.update(query: "web")
-    #expect(labels == ["Web server"])
+    // The back row is prepended to every submenu; the search result follows it.
+    #expect(labels == ["Back", "Web server"])
 }
 
 @MainActor
@@ -80,4 +81,46 @@ import Testing
     #expect(labels == ["Editor"])
     controller.update(query: "ide")   // alias
     #expect(labels == ["Editor"])
+}
+
+@MainActor
+@Test func backRowIsConfigurableAndOnlyInSubmenus() {
+    let controller = MenuController(appIndex: AppIndex(), runtime: LuaRuntime())
+    controller.nodes = [
+        MenuNode(id: "root", parent: "", kind: .menu, label: "Go", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: nil, order: 0),
+        MenuNode(id: "setup", parent: "root", kind: .menu, label: "Setup", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: nil, order: 1),
+        MenuNode(id: "setup.wifi", parent: "setup", kind: .action, label: "Wi-Fi", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: .shell("true"), order: 2),
+    ]
+    var labels: [String] = []
+    controller.onRows = { _, rows in labels = rows.map(\.label) }
+
+    controller.open(route: "root")
+    #expect(labels == ["Setup"])          // never at root
+
+    controller.open(route: "setup")
+    #expect(labels == ["Back", "Wi-Fi"])
+
+    // It is not a candidate for the fuzzy filter, so a query never drops it.
+    controller.update(query: "wifi")
+    #expect(labels.first == "Back")
+
+    controller.backRow = BackRowSpec(enabled: true, label: "Up", symbol: "arrow.left", detail: "", position: "bottom")
+    #expect(labels == ["Wi-Fi", "Up"])
+
+    controller.backRow = BackRowSpec(enabled: false)
+    #expect(labels == ["Wi-Fi"])
+}
+
+@MainActor
+@Test func backRowActivationNavigatesBack() {
+    let controller = MenuController(appIndex: AppIndex(), runtime: LuaRuntime())
+    controller.nodes = [
+        MenuNode(id: "root", parent: "", kind: .menu, label: "Go", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: nil, order: 0),
+        MenuNode(id: "setup", parent: "root", kind: .menu, label: "Setup", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: nil, order: 1),
+    ]
+    var labels: [String] = []
+    controller.onRows = { _, rows in labels = rows.map(\.label) }
+    controller.open(route: "setup")
+    controller.activate(DisplayRow(id: "orbit.back", kind: .back, label: "Back", detail: "", symbol: "", image: nil, score: -1, section: "back"))
+    #expect(labels == ["Setup"])          // back at root, so no back row
 }

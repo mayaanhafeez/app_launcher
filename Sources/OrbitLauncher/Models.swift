@@ -6,6 +6,9 @@ enum RowKind: String, Sendable {
     case app
     case notice
     case separator
+    /// The synthetic row that leaves a submenu. It backs no `MenuNode`, so every
+    /// place that looks a row up by id has to check for it first.
+    case back
 }
 
 /// An action described by Lua and executed by the host. Provider states have no
@@ -104,10 +107,63 @@ struct HotKeySpec: Sendable, Equatable {
     var modifiers: [String] = ["option"]
 }
 
+/// The row that leaves a submenu, configured by `back = { ... }` in config.lua.
+/// `back = false` there switches it off entirely.
+struct BackRowSpec: Sendable, Equatable {
+    var enabled = true
+    var label = "Back"
+    /// SF Symbol name; empty leaves the icon slot blank.
+    var symbol = "chevron.left"
+    var detail = ""
+    /// `"top"` or `"bottom"` — anything else reads as top.
+    var position = "top"
+
+    var atTop: Bool { position.lowercased() != "bottom" }
+}
+
+/// Positional shortcuts for the visible list: the nth key activates the nth row.
+/// Configured by `shortcuts = { ... }` in config.lua; `shortcuts = false` switches
+/// them off. Kept pure — no AppKit state beyond the flags — so the key map is
+/// testable without a window, like `VimKeys`.
+struct ShortcutSpec: Sendable, Equatable {
+    var enabled = true
+    /// Modifier names from the same vocabulary as `hotkey.mods`.
+    var modifiers: [String] = ["command"]
+    /// Key characters by position: the first activates row 1, the second row 2, and
+    /// so on. Ten by default, so "0" is the tenth row rather than the zeroth.
+    var keys: [String] = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]
+
+    var flags: NSEvent.ModifierFlags {
+        modifiers.reduce(into: NSEvent.ModifierFlags()) { mask, name in
+            switch name.lowercased() {
+            case "command", "cmd", "super": mask.insert(.command)
+            case "option", "opt", "alt": mask.insert(.option)
+            case "control", "ctrl": mask.insert(.control)
+            case "shift": mask.insert(.shift)
+            default: break
+            }
+        }
+    }
+
+    /// The 0-based list position a key press selects, or nil if it isn't a shortcut.
+    /// Only the four intent-carrying modifiers are compared: caps lock and the
+    /// numeric-pad/function bits ride along on ordinary presses and would otherwise
+    /// break an exact match.
+    func position(for characters: String, modifiers pressed: NSEvent.ModifierFlags) -> Int? {
+        guard enabled else { return nil }
+        let considered: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
+        guard !flags.isEmpty, pressed.intersection(considered) == flags else { return nil }
+        let needle = characters.lowercased()
+        return keys.firstIndex { $0.lowercased() == needle }
+    }
+}
+
 struct Settings: Sendable {
     var hotKey = HotKeySpec()
     /// Modal navigation, off unless `vim = true` in config.lua.
     var vimMode = false
+    var back = BackRowSpec()
+    var shortcuts = ShortcutSpec()
 }
 
 // MARK: - Vim mode

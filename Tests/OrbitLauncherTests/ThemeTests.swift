@@ -77,3 +77,20 @@ import Testing
     // Option is not a system-shortcut modifier here, so it is still swallowed.
     #expect(action("j", .option) == .moveDown)
 }
+
+@Test func shortcutsMapPositionsAndRequireTheirExactModifiers() {
+    let spec = ShortcutSpec()
+    #expect(spec.position(for: "1", modifiers: [.command]) == 0)
+    #expect(spec.position(for: "0", modifiers: [.command]) == 9)
+    // Caps lock and the numeric-pad bit ride along on ordinary presses.
+    #expect(spec.position(for: "2", modifiers: [.command, .capsLock]) == 1)
+    // A different modifier set is a different chord, not this one.
+    #expect(spec.position(for: "1", modifiers: [.command, .shift]) == nil)
+    #expect(spec.position(for: "1", modifiers: []) == nil)
+    #expect(spec.position(for: "a", modifiers: [.command]) == nil)
+
+    let custom = ShortcutSpec(modifiers: ["control", "option"], keys: ["a", "s", "d"])
+    #expect(custom.position(for: "S", modifiers: [.control, .option]) == 1)
+    #expect(custom.position(for: "s", modifiers: [.command]) == nil)
+    #expect(ShortcutSpec(enabled: false).position(for: "1", modifiers: [.command]) == nil)
+}

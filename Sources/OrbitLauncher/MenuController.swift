@@ -10,6 +10,13 @@ final class MenuController {
     private var providerGeneration = 0
     private var query = ""
     private var iconCache: [String: NSImage] = [:]
+    /// Appearance of the synthetic back row. Republished on every config reload.
+    var backRow = BackRowSpec() {
+        didSet {
+            guard backRow != oldValue else { return }
+            refresh(query: query)
+        }
+    }
     var onRows: ((String, [DisplayRow]) -> Void)?
     var onNotice: ((String) -> Void)?
     var onDismiss: (() -> Void)?
@@ -38,6 +45,12 @@ final class MenuController {
     func update(query: String) { refresh(query: query) }
 
     func activate(_ row: DisplayRow) {
+        if row.kind == .back {
+            // Only reachable inside a submenu, but a back that finds nothing to pop
+            // means the same thing here as Escape at root does.
+            if !back() { onDismiss?() }
+            return
+        }
         if row.kind == .app {
             appIndex.launch(path: String(row.id.dropFirst(4)))
             onDismiss?()
@@ -136,7 +149,7 @@ final class MenuController {
             }
         }
         let baseRows = rows
-        onRows?(title, baseRows)
+        onRows?(title, decorated(baseRows))
 
         // A provider belongs to the submenu that declares it and supplies that
         // submenu's rows while it is open — entering `search` is what runs `search`'s
@@ -148,11 +161,23 @@ final class MenuController {
             DispatchQueue.main.async {
                 guard let self, generation == self.providerGeneration else { return }
                 switch result {
-                case .success(let providerRows): self.onRows?(title, baseRows + providerRows)
+                case .success(let providerRows): self.onRows?(title, self.decorated(baseRows + providerRows))
                 case .failure(let error): self.onNotice?(error.localizedDescription)
                 }
             }
         }
+    }
+
+    /// The back row is synthetic and is added at the point of emission, not merged
+    /// into `candidates`: a static row goes through the fuzzy filter, so the first
+    /// keystroke would drop the one row that is meant to survive every query. Adding
+    /// it here also keeps `position = "bottom"` below the provider rows, which arrive
+    /// after the base list.
+    private func decorated(_ rows: [DisplayRow]) -> [DisplayRow] {
+        guard backRow.enabled, activeMenu != "root" else { return rows }
+        let row = DisplayRow(id: "orbit.back", kind: .back, label: backRow.label, detail: backRow.detail,
+                             symbol: backRow.symbol, image: nil, score: -1, section: "back")
+        return backRow.atTop ? [row] + rows : rows + [row]
     }
 
     private func isDescendant(_ node: MenuNode, of ancestor: String) -> Bool {

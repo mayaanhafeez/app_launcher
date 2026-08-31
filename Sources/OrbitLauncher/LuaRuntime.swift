@@ -241,27 +241,66 @@ final class LuaRuntime: @unchecked Sendable {
         lua_getfield(state, -1, "vim")
         if lua_type(state, -1) == LUA_TBOOLEAN { settings.vimMode = lua_toboolean(state, -1) != 0 }
         lua_settop(state, -2)
+        // `back = false` is the short way to switch the row off; the table form
+        // configures it. Decoded before `hotkey`, whose guard returns early.
+        lua_getfield(state, -1, "back")
+        if lua_type(state, -1) == LUA_TBOOLEAN {
+            settings.back.enabled = lua_toboolean(state, -1) != 0
+        } else if lua_type(state, -1) == LUA_TTABLE {
+            func field(_ name: String) -> String? {
+                lua_getfield(state, -1, name); defer { lua_settop(state, -2) }; return luaString(state, -1)
+            }
+            lua_getfield(state, -1, "enabled")
+            if lua_type(state, -1) == LUA_TBOOLEAN { settings.back.enabled = lua_toboolean(state, -1) != 0 }
+            lua_settop(state, -2)
+            if let label = field("label"), !label.isEmpty { settings.back.label = label }
+            if let symbol = field("symbol") { settings.back.symbol = symbol }
+            if let detail = field("detail") { settings.back.detail = detail }
+            if let position = field("position"), !position.isEmpty { settings.back.position = position }
+        }
+        lua_settop(state, -2)
+
+        // `shortcuts = false` switches the positional keys off; the table form
+        // re-maps them. Decoded before `hotkey`, whose guard returns early.
+        lua_getfield(state, -1, "shortcuts")
+        if lua_type(state, -1) == LUA_TBOOLEAN {
+            settings.shortcuts.enabled = lua_toboolean(state, -1) != 0
+        } else if lua_type(state, -1) == LUA_TTABLE {
+            lua_getfield(state, -1, "enabled")
+            if lua_type(state, -1) == LUA_TBOOLEAN { settings.shortcuts.enabled = lua_toboolean(state, -1) != 0 }
+            lua_settop(state, -2)
+            if let mods = stringList(state, field: "mods") { settings.shortcuts.modifiers = mods }
+            if let keys = stringList(state, field: "keys") { settings.shortcuts.keys = keys }
+        }
+        lua_settop(state, -2)
+
         lua_getfield(state, -1, "hotkey")
         defer { lua_settop(state, -2) }
         guard lua_type(state, -1) == LUA_TTABLE else { return settings }
         lua_getfield(state, -1, "key")
         if let key = luaString(state, -1), !key.isEmpty { settings.hotKey.key = key }
         lua_settop(state, -2)
-        lua_getfield(state, -1, "mods")
-        if lua_type(state, -1) == LUA_TTABLE {
-            var mods: [String] = []
-            let count = Int(lua_rawlen(state, -1))
-            if count > 0 {
-                for index in 1...count {
-                    lua_rawgeti(state, -1, lua_Integer(index))
-                    if let value = luaString(state, -1) { mods.append(value) }
-                    lua_settop(state, -2)
-                }
-            }
-            settings.hotKey.modifiers = mods
-        }
-        lua_settop(state, -2)
+        if let mods = stringList(state, field: "mods") { settings.hotKey.modifiers = mods }
         return settings
+    }
+
+    /// The array under `field` on the table at the top of the stack, or nil when the
+    /// key is absent or isn't a table — a missing key has to leave the default in
+    /// place rather than blanking it.
+    private static func stringList(_ state: OpaquePointer, field: String) -> [String]? {
+        lua_getfield(state, -1, field)
+        defer { lua_settop(state, -2) }
+        guard lua_type(state, -1) == LUA_TTABLE else { return nil }
+        var values: [String] = []
+        let count = Int(lua_rawlen(state, -1))
+        if count > 0 {
+            for index in 1...count {
+                lua_rawgeti(state, -1, lua_Integer(index))
+                if let value = luaString(state, -1) { values.append(value) }
+                lua_settop(state, -2)
+            }
+        }
+        return values
     }
 
     private func decodeNode(_ state: OpaquePointer, order: Int) -> MenuNode? {
