@@ -99,7 +99,14 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let cell = RowView()
         cell.configure(item: rows[row], theme: theme)
+        cell.setSelected(row == table.selectedRow, theme: theme)
         return cell
+    }
+
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        for row in table.rows(in: table.visibleRect).integerRange {
+            (table.view(atColumn: 0, row: row, makeIfNecessary: false) as? RowView)?.setSelected(row == table.selectedRow, theme: theme)
+        }
     }
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
@@ -224,21 +231,27 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
 }
 
 final class RowView: NSTableCellView {
+    private let selectionBackground = NSView()
     private let divider = NSBox()
     private let iconView = NSImageView()
     private let symbol = NSImageView()
     private let label = NSTextField(labelWithString: "")
     private let detail = NSTextField(labelWithString: "")
     private let chevron = NSImageView(image: NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil) ?? NSImage())
+    private var theme = Theme()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
+        selectionBackground.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(selectionBackground)
         [divider, iconView, symbol, label, detail, chevron].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; addSubview($0) }
+        selectionBackground.wantsLayer = true
         divider.boxType = .separator
         iconView.imageScaling = .scaleProportionallyUpOrDown
         detail.lineBreakMode = .byTruncatingTail
         NSLayoutConstraint.activate([
+            selectionBackground.leadingAnchor.constraint(equalTo: leadingAnchor), selectionBackground.trailingAnchor.constraint(equalTo: trailingAnchor), selectionBackground.topAnchor.constraint(equalTo: topAnchor), selectionBackground.bottomAnchor.constraint(equalTo: bottomAnchor),
             divider.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4), divider.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4), divider.topAnchor.constraint(equalTo: topAnchor),
             iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12), iconView.centerYAnchor.constraint(equalTo: centerYAnchor), iconView.widthAnchor.constraint(equalToConstant: 28), iconView.heightAnchor.constraint(equalToConstant: 28),
             symbol.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 15), symbol.centerYAnchor.constraint(equalTo: centerYAnchor), symbol.widthAnchor.constraint(equalToConstant: 21), symbol.heightAnchor.constraint(equalToConstant: 21),
@@ -251,6 +264,7 @@ final class RowView: NSTableCellView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func configure(item: DisplayRow, theme: Theme) {
+        self.theme = theme
         iconView.image = item.image
         iconView.isHidden = item.image == nil
         symbol.image = item.image == nil && !item.symbol.isEmpty ? NSImage(systemSymbolName: item.symbol, accessibilityDescription: nil) : nil
@@ -268,9 +282,29 @@ final class RowView: NSTableCellView {
         divider.isHidden = item.section != "drilldown-start"
         layer?.cornerRadius = max(8, theme.radius - 7)
         layer?.cornerCurve = .continuous
+        selectionBackground.layer?.cornerRadius = max(8, theme.radius - 7)
+        selectionBackground.layer?.cornerCurve = .continuous
+        setSelected(false, theme: theme)
     }
 
     override var backgroundStyle: NSView.BackgroundStyle {
-        didSet { layer?.backgroundColor = backgroundStyle == .emphasized ? NSColor.controlAccentColor.withAlphaComponent(0.3).cgColor : NSColor.clear.cgColor }
+        didSet {}
     }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        setSelected(false, theme: theme)
+    }
+
+    func setSelected(_ selected: Bool, theme: Theme) {
+        selectionBackground.layer?.backgroundColor = selected ? theme.accent.withAlphaComponent(0.9).cgColor : NSColor.clear.cgColor
+        label.textColor = selected ? theme.bg : theme.fg
+        detail.textColor = selected ? theme.bg.withAlphaComponent(0.72) : theme.fgMuted
+        symbol.contentTintColor = selected ? theme.bg : theme.fg
+        chevron.contentTintColor = selected ? theme.bg.withAlphaComponent(0.8) : theme.fgMuted
+    }
+}
+
+private extension NSRange {
+    var integerRange: Range<Int> { location..<(location + length) }
 }
