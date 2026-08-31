@@ -132,6 +132,8 @@ struct ShortcutSpec: Sendable, Equatable {
     /// Key characters by position: the first activates row 1, the second row 2, and
     /// so on. Ten by default, so "0" is the tenth row rather than the zeroth.
     var keys: [String] = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]
+    /// Draw each row's shortcut on its right-hand side.
+    var hints = true
 
     var flags: NSEvent.ModifierFlags {
         modifiers.reduce(into: NSEvent.ModifierFlags()) { mask, name in
@@ -143,6 +145,24 @@ struct ShortcutSpec: Sendable, Equatable {
             default: break
             }
         }
+    }
+
+    /// Modifier glyphs in the order macOS writes them, so a hint reads the way the
+    /// same chord would in any other menu.
+    var modifierGlyphs: String {
+        let flags = self.flags
+        var glyphs = ""
+        if flags.contains(.control) { glyphs += "\u{2303}" }
+        if flags.contains(.option) { glyphs += "\u{2325}" }
+        if flags.contains(.shift) { glyphs += "\u{21E7}" }
+        if flags.contains(.command) { glyphs += "\u{2318}" }
+        return glyphs
+    }
+
+    /// What to draw on the row at `position`, or nil where there is no key for it.
+    func hint(at position: Int) -> String? {
+        guard enabled, hints, keys.indices.contains(position) else { return nil }
+        return modifierGlyphs + keys[position].uppercased()
     }
 
     /// The 0-based list position a key press selects, or nil if it isn't a shortcut.

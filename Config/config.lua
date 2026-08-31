@@ -152,6 +152,7 @@ return {
   -- `shortcuts = false` removes them; `mods` takes the same names as `hotkey.mods`.
   shortcuts = {
     enabled = true,
+    hints = true,          -- draw the shortcut on the right of each row
     mods = { "command" },
     keys = { "1", "2", "3", "4", "5", "6", "7", "8", "9", "0" },
   },

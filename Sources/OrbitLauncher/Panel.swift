@@ -75,7 +75,16 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
         }
     }
     /// Positional list shortcuts, republished on every config reload.
-    var shortcuts = ShortcutSpec()
+    var shortcuts = ShortcutSpec() {
+        didSet {
+            guard shortcuts != oldValue else { return }
+            rebuildHints()
+            table.reloadData()
+        }
+    }
+    /// One hint per row, parallel to `rows`. Precomputed rather than derived in
+    /// `viewFor`, which would re-count the rows above every row it builds.
+    private var hints: [String] = []
     private var mode: InputMode = .normal
     /// Held for the process lifetime: the panel controller is owned by the app
     /// delegate and outlives every other object, so there is nothing to tear down.
@@ -149,6 +158,7 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
     func update(title: String, rows: [DisplayRow]) {
         self.title = title
         self.rows = rows
+        rebuildHints()
         updatePrompt()
         // Reload first: `resizeToContent` ends in `setFrame(display: true)`, which lays
         // the table out synchronously and asks for row heights. Resizing before the
@@ -166,6 +176,18 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
             table.scrollRowToVisible(first)
         }
         repaintSelection()
+    }
+
+    /// The back row carries no shortcut and takes no number, so the hints stay in
+    /// step with what `activate(position:)` counts.
+    private func rebuildHints() {
+        var position = 0
+        hints = rows.map { row in
+            guard row.kind != .back else { return "" }
+            let hint = shortcuts.hint(at: position) ?? ""
+            position += 1
+            return hint
+        }
     }
 
     func showNotice(_ message: String) {
@@ -295,7 +317,9 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         guard rows.indices.contains(row) else { return nil }
         let cell = (tableView.makeView(withIdentifier: rowIdentifier, owner: self) as? RowView) ?? RowView(identifier: rowIdentifier)
-        cell.configure(item: rows[row], theme: theme, showDetail: showsDetail(rows[row]), showDivider: rows[row].section == "drilldown-start" && row > 0)
+        cell.configure(item: rows[row], theme: theme, showDetail: showsDetail(rows[row]),
+                       showDivider: rows[row].section == "drilldown-start" && row > 0,
+                       shortcut: hints.indices.contains(row) ? hints[row] : "")
         cell.setSelected(row == table.selectedRow, theme: theme)
         return cell
     }
@@ -543,6 +567,7 @@ final class RowView: NSTableCellView {
     private let symbol = NSImageView()
     private let label = NSTextField(labelWithString: "")
     private let detail = NSTextField(labelWithString: "")
+    private let shortcut = NSTextField(labelWithString: "")
     private let column = NSStackView()
     private let chevron = NSImageView(image: NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil) ?? NSImage())
     private var theme = Theme()
@@ -564,6 +589,7 @@ final class RowView: NSTableCellView {
     private var columnLeading: NSLayoutConstraint!
     private var chevronTrailing: NSLayoutConstraint!
     private var chevronWidth: NSLayoutConstraint!
+    private var shortcutTrailing: NSLayoutConstraint!
 
     convenience init(identifier: NSUserInterfaceItemIdentifier) {
         self.init(frame: .zero)
@@ -574,10 +600,14 @@ final class RowView: NSTableCellView {
         super.init(frame: frameRect)
         wantsLayer = true
         [selectionBackground, divider].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; $0.wantsLayer = true; addSubview($0) }
-        [selectionBar, iconView, symbol, column, chevron].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; addSubview($0) }
+        [selectionBar, iconView, symbol, column, shortcut, chevron].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; addSubview($0) }
         selectionBar.wantsLayer = true
 
         iconView.imageScaling = .scaleProportionallyUpOrDown
+        shortcut.alignment = .right
+        // The hint is fixed-size chrome: the label column truncates around it.
+        shortcut.setContentCompressionResistancePriority(.required, for: .horizontal)
+        shortcut.setContentHuggingPriority(.required, for: .horizontal)
         detail.lineBreakMode = .byTruncatingTail
         label.lineBreakMode = .byTruncatingTail
 
@@ -597,7 +627,11 @@ final class RowView: NSTableCellView {
         selectionTrailing = selectionBackground.trailingAnchor.constraint(equalTo: trailingAnchor)
         dividerHeight = divider.heightAnchor.constraint(equalToConstant: 1)
         dividerTop = divider.topAnchor.constraint(equalTo: topAnchor)
-        columnTrailing = column.trailingAnchor.constraint(lessThanOrEqualTo: chevron.leadingAnchor)
+        columnTrailing = column.trailingAnchor.constraint(lessThanOrEqualTo: shortcut.leadingAnchor)
+        // Hung off the chevron rather than the row edge, so a hint sits the same
+        // distance from the edge whether or not its row draws a chevron — the
+        // chevron keeps its width when hidden.
+        shortcutTrailing = shortcut.trailingAnchor.constraint(equalTo: chevron.leadingAnchor)
         barWidth = selectionBar.widthAnchor.constraint(equalToConstant: 0)
         barLeading = selectionBar.leadingAnchor.constraint(equalTo: selectionBackground.leadingAnchor)
         iconLeading = iconView.leadingAnchor.constraint(equalTo: selectionBackground.leadingAnchor)
@@ -621,13 +655,14 @@ final class RowView: NSTableCellView {
             iconLeading, iconWidth, iconHeight, iconView.centerYAnchor.constraint(equalTo: selectionBackground.centerYAnchor),
             symbolLeading, symbolWidth, symbolHeight, symbol.centerYAnchor.constraint(equalTo: selectionBackground.centerYAnchor),
             columnLeading, column.centerYAnchor.constraint(equalTo: selectionBackground.centerYAnchor), columnTrailing,
+            shortcutTrailing, shortcut.centerYAnchor.constraint(equalTo: selectionBackground.centerYAnchor),
             chevronTrailing, chevronWidth, chevron.centerYAnchor.constraint(equalTo: selectionBackground.centerYAnchor),
         ])
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func configure(item: DisplayRow, theme: Theme, showDetail: Bool, showDivider: Bool) {
+    func configure(item: DisplayRow, theme: Theme, showDetail: Bool, showDivider: Bool, shortcut hint: String) {
         self.theme = theme
 
         let dividerStrip = showDivider ? theme.space(theme.dividerHeight) : 0
@@ -669,6 +704,13 @@ final class RowView: NSTableCellView {
         detail.isHidden = !showDetail
         column.spacing = theme.space(theme.labelGap)
 
+        // Empty and hidden, the label measures zero wide, which puts the column's
+        // trailing limit back exactly where the chevron alone used to put it.
+        shortcut.stringValue = hint
+        shortcut.isHidden = hint.isEmpty
+        shortcut.font = theme.font(size: theme.captionSize, weight: .semibold)
+        shortcutTrailing.constant = hint.isEmpty ? 0 : -theme.space(theme.iconGap)
+
         selectionBackground.layer?.cornerRadius = theme.rowRadius
         selectionBackground.layer?.cornerCurve = .continuous
         selectionBar.layer?.cornerRadius = min(theme.rowRadius, barWidth.constant / 2)
@@ -685,6 +727,7 @@ final class RowView: NSTableCellView {
         label.textColor = selected ? theme.selectionText : theme.fg
         detail.textColor = selected ? theme.selectionText.withAlphaComponent(theme.detailAlpha) : theme.detailColor
         symbol.contentTintColor = selected ? theme.selectionText : theme.fg
+        shortcut.textColor = selected ? theme.selectionText : theme.chevronColor
         chevron.contentTintColor = selected ? theme.selectionText : theme.chevronColor
     }
 }

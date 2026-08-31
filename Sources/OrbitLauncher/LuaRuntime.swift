@@ -269,6 +269,9 @@ final class LuaRuntime: @unchecked Sendable {
             lua_getfield(state, -1, "enabled")
             if lua_type(state, -1) == LUA_TBOOLEAN { settings.shortcuts.enabled = lua_toboolean(state, -1) != 0 }
             lua_settop(state, -2)
+            lua_getfield(state, -1, "hints")
+            if lua_type(state, -1) == LUA_TBOOLEAN { settings.shortcuts.hints = lua_toboolean(state, -1) != 0 }
+            lua_settop(state, -2)
             if let mods = stringList(state, field: "mods") { settings.shortcuts.modifiers = mods }
             if let keys = stringList(state, field: "keys") { settings.shortcuts.keys = keys }
         }

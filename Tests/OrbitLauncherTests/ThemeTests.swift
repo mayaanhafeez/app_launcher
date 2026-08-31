@@ -89,6 +89,13 @@ import Testing
     #expect(spec.position(for: "1", modifiers: []) == nil)
     #expect(spec.position(for: "a", modifiers: [.command]) == nil)
 
+    // Hints read as the chord does anywhere else in macOS.
+    #expect(spec.hint(at: 0) == "\u{2318}1")
+    #expect(spec.hint(at: 9) == "\u{2318}0")
+    #expect(spec.hint(at: 10) == nil)
+    #expect(ShortcutSpec(hints: false).hint(at: 0) == nil)
+    #expect(ShortcutSpec(modifiers: ["command", "shift", "control"]).hint(at: 0) == "\u{2303}\u{21E7}\u{2318}1")
+
     let custom = ShortcutSpec(modifiers: ["control", "option"], keys: ["a", "s", "d"])
     #expect(custom.position(for: "S", modifiers: [.control, .option]) == 1)
     #expect(custom.position(for: "s", modifiers: [.command]) == nil)

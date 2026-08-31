@@ -161,7 +161,13 @@ pure function of characters plus modifiers, so it is testable without a window. 
 filters out `kind == .back` before indexing, which is what keeps ⌘1 on the first real item with the back row at either
 end, and it swallows a key past the end of the list rather than letting it reach the field. Dispatch is
 `performKeyEquivalent` → `routeKey`, which works here precisely because these are modified keys — the reason plain keys
-need the vim-mode event monitor instead. Configured by `shortcuts = { enabled, mods, keys }` (or `shortcuts = false`).
+need the vim-mode event monitor instead. Configured by `shortcuts = { enabled, hints, mods, keys }` (or `shortcuts = false`).
+
+`hints` draws each row's chord on its right. `PanelController` precomputes one hint per row in `rebuildHints` rather
+than deriving it in `viewFor`, which would re-count the rows above every row it builds. The label hangs off
+`chevron.leadingAnchor`, not the row edge, so a hint sits the same distance from the edge whether or not its row draws a
+chevron — a hidden chevron keeps its width — and an empty hint measures zero wide, which leaves the label column's
+trailing limit exactly where the chevron alone used to put it.
 
 ### Vim mode
 
