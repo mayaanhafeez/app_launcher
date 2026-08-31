@@ -172,6 +172,12 @@ return {
   --   Enter      activate, in either mode
   -- Arrow keys keep working in both modes.
   vim = false,
+
+  -- Start Orbit at login. Off by default: registering with launchd is a thing to
+  -- opt into. It can also be toggled from the menu bar, and this value wins the
+  -- next time the config is saved. Only works from the built .app bundle.
+  login_item = false,
+
   items = items,
   providers = providers,
 }

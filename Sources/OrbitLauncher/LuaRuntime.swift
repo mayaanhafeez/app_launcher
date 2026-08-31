@@ -283,6 +283,10 @@ final class LuaRuntime: @unchecked Sendable {
         }
         lua_settop(state, -2)
 
+        lua_getfield(state, -1, "login_item")
+        if lua_type(state, -1) == LUA_TBOOLEAN { settings.loginItem = lua_toboolean(state, -1) != 0 }
+        lua_settop(state, -2)
+
         lua_getfield(state, -1, "apps")
         if lua_type(state, -1) == LUA_TTABLE {
             if let paths = stringList(state, field: "paths") { settings.apps.paths = paths }
@@ -513,6 +517,9 @@ final class ThemeRuntime: @unchecked Sendable {
 
         if let value = number("spacing_scale"), value > 0 { theme.spacingScale = value }
         size("panel_padding", &theme.panelPadding)
+        if let value = number("padding_top"), value >= 0 { theme.paddingTop = value }
+        if let value = number("padding_bottom"), value >= 0 { theme.paddingBottom = value }
+        if let value = number("padding_sides"), value >= 0 { theme.paddingSides = value }
         size("row_gap", &theme.rowGap)
         size("row_padding_x", &theme.rowPaddingX)
         size("icon_slot", &theme.iconSlot)

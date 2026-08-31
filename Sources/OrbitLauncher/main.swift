@@ -13,6 +13,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var themePointerWatcher: ConfigWatcher?
     private var ipc: IPCServer?
     private var menuBar: MenuBarItem?
+    /// The last value acted on, so an unrelated config save doesn't undo a toggle
+    /// made from the menu bar. A real change in `config.lua` still wins.
+    private var appliedLoginItem: Bool?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -35,6 +38,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.backRow = settings.back
             panel.shortcuts = settings.shortcuts
             appIndex.apply(scan: settings.apps)
+            if appliedLoginItem != settings.loginItem {
+                appliedLoginItem = settings.loginItem
+                setLoginItem(settings.loginItem)
+            }
             if hotKey?.register(settings.hotKey) == false {
                 panel.showNotice("Unknown hotkey: \(settings.hotKey.key)")
             }
@@ -81,7 +88,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menuBar = MenuBarItem()
         menuBar.onOpenConfig = { [weak self] in self?.openConfigDirectory() }
         menuBar.onReload = { [weak self] in self?.reloadAll() }
+        menuBar.onToggleLoginItem = { [weak self] in
+            guard let self else { return }
+            let enabled = !LoginItem.isEnabled
+            appliedLoginItem = enabled
+            setLoginItem(enabled)
+        }
         self.menuBar = menuBar
+    }
+
+    private func setLoginItem(_ enabled: Bool) {
+        do {
+            try LoginItem.setEnabled(enabled)
+            // Registering can succeed and still leave the item switched off until the
+            // user approves it, which looks like a silent failure otherwise.
+            if enabled, LoginItem.requiresApproval {
+                panel.showNotice("Approve Orbit in System Settings › General › Login Items")
+            }
+        } catch {
+            panel.showNotice("Login item failed: \(error.localizedDescription)")
+        }
     }
 
     /// A fresh install has no `~/.config/orbit` until the templates are copied, and

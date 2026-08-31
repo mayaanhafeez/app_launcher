@@ -149,7 +149,12 @@ keeping the directory scan regardless, since Spotlight indexes nothing under `/S
 `Theme` (`Models.swift`) is the entire appearance surface, by design: layout is native, so a value
 hardcoded in `Panel.swift` is one the user can never reach. It carries colour, alpha, geometry,
 spacing and typography. One `fontSize` drives a proportional scale and `spacingScale` multiplies
-every spacing token, so either alone rescales the panel coherently. Selection follows Omarchy — a
+every spacing token, so either alone rescales the panel coherently. `panelPadding` is the
+uniform inset; `paddingTop`/`paddingBottom`/`paddingSides` are optional per-edge overrides
+that fall back to it when nil. Layout and `resizeToContent` both read the resolved
+`topPadding`/`bottomPadding`/`sidePadding` accessors rather than `panelPadding` directly —
+sizing the card from one value while laying it out from another is how the content and the
+frame drift apart. Selection follows Omarchy — a
 low-alpha wash plus accent-tinted text, not an inverted accent slab.
 
 `ThemeRuntime` seeds palette-derived roles *first*, then applies explicit `theme.lua` keys, so
@@ -218,9 +223,19 @@ NORMAL while the field is editing.
 ### Menu bar
 
 `MenuBarItem` (`SystemServices.swift`) is the only persistent UI outside the panel: an `NSStatusItem` with Open Config
-Folder / Reload Config / Quit. The app is `LSUIElement`, so without it the only ways to reload or quit are `orbitctl`
+Folder / Reload Config / Open at Login / Quit. The app is `LSUIElement`, so without it the only ways to reload or quit are `orbitctl`
 and `kill`. "Open Config Folder" creates `~/.config/orbit` first — opening a path that doesn't exist does nothing at
 all.
+
+`LoginItem` wraps `SMAppService.mainApp` — no helper target, no legacy `SMLoginItemSetEnabled`. It only works from a
+real bundle (the bare `swift build` binary has no Info.plist for launchd), and registration is tied to the bundle's
+signature and location, so re-signing or moving the app can orphan it. `register()` can also succeed while leaving the
+item in `.requiresApproval`, which looks like a silent failure unless the notice says so.
+
+`login_item` in `config.lua` is applied **only when the value changes** (`AppDelegate.appliedLoginItem`), so a toggle
+made from the menu bar survives every unrelated config save; an actual edit to the key still wins. The menu's checkmark
+is resolved in `menuNeedsUpdate` rather than cached, because System Settings can switch the item off without telling
+the app.
 
 ### IPC
 

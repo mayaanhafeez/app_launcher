@@ -195,6 +195,9 @@ struct Settings: Sendable {
     var hotKey = HotKeySpec()
     /// Modal navigation, off unless `vim = true` in config.lua.
     var vimMode = false
+    /// Launch at login, off unless `login_item = true` in config.lua. Registering
+    /// something with launchd is not a thing to do to a user by default.
+    var loginItem = false
     var back = BackRowSpec()
     var shortcuts = ShortcutSpec()
     var apps = AppScanSpec()
@@ -278,6 +281,11 @@ struct Theme: Sendable {
     // Spacing, all multiplied by `spacingScale`
     var spacingScale: CGFloat = 1
     var panelPadding: CGFloat = 12
+    /// Per-edge overrides for `panelPadding`. Unset means "follow panelPadding", so a
+    /// theme that only sets `panel_padding` keeps the uniform inset it has today.
+    var paddingTop: CGFloat? = nil
+    var paddingBottom: CGFloat? = nil
+    var paddingSides: CGFloat? = nil
     var rowGap: CGFloat = 2
     var rowPaddingX: CGFloat = 10
     var iconSlot: CGFloat = 34
@@ -302,6 +310,13 @@ struct Theme: Sendable {
 
 extension Theme {
     func space(_ value: CGFloat) -> CGFloat { value <= 0 ? 0 : max(1, (value * spacingScale).rounded()) }
+
+    // Resolved, scaled edge insets. Every call site uses these rather than
+    // `space(panelPadding)`, so an override reaches the layout and the content
+    // sizing together.
+    var topPadding: CGFloat { space(paddingTop ?? panelPadding) }
+    var bottomPadding: CGFloat { space(paddingBottom ?? panelPadding) }
+    var sidePadding: CGFloat { space(paddingSides ?? panelPadding) }
 
     private func scaled(_ multiplier: CGFloat) -> CGFloat { max(1, (fontSize * multiplier).rounded()) }
 

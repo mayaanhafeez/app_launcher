@@ -1,17 +1,48 @@
 import AppKit
 import Carbon
 import Darwin
+import ServiceManagement
+
+/// Launch at login, via the bundle's own `SMAppService`. There is no helper target
+/// and no legacy `SMLoginItemSetEnabled`: `mainApp` registers the app itself.
+///
+/// This only works from a real bundle — the bare `swift build` binary has no
+/// Info.plist for launchd to register, so registration there throws rather than
+/// silently doing nothing. Registration is also tied to the bundle's signature and
+/// location, so re-signing or moving the app can orphan the login item.
+@MainActor
+enum LoginItem {
+    static var isEnabled: Bool { SMAppService.mainApp.status == .enabled }
+
+    /// macOS can park a registration in "requires approval": the app is registered
+    /// but stays off until the user enables it in System Settings.
+    static var requiresApproval: Bool { SMAppService.mainApp.status == .requiresApproval }
+
+    static func setEnabled(_ enabled: Bool) throws {
+        let service = SMAppService.mainApp
+        if enabled {
+            guard service.status != .enabled else { return }
+            try service.register()
+        } else {
+            guard service.status == .enabled else { return }
+            try service.unregister()
+        }
+    }
+}
 
 /// The only persistent UI outside the panel. The app is an accessory (`LSUIElement`),
 /// so without this there is no way to reach the config, force a reload, or quit
 /// except `orbitctl` and `kill`.
 @MainActor
-final class MenuBarItem {
+final class MenuBarItem: NSObject, NSMenuDelegate {
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private let loginToggle = NSMenuItem(title: "Open at Login", action: #selector(toggleLoginItem), keyEquivalent: "")
     var onOpenConfig: (() -> Void)?
     var onReload: (() -> Void)?
+    var onToggleLoginItem: (() -> Void)?
 
     init(symbol: String = "circle.dashed") {
+        super.init()
         let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Orbit")
         image?.isTemplate = true   // so it tracks the menu bar's light/dark appearance
         item.button?.image = image
@@ -20,11 +51,21 @@ final class MenuBarItem {
         let menu = NSMenu()
         menu.addItem(withTitle: "Open Config Folder", action: #selector(openConfig), keyEquivalent: ",").target = self
         menu.addItem(withTitle: "Reload Config", action: #selector(reload), keyEquivalent: "r").target = self
+        loginToggle.target = self
+        menu.addItem(loginToggle)
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Orbit", action: #selector(quit), keyEquivalent: "q").target = self
+        menu.delegate = self
         item.menu = menu
     }
 
+    /// The login item can be switched off in System Settings without telling the app,
+    /// so the checkmark is resolved every time the menu opens rather than cached.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        loginToggle.state = LoginItem.isEnabled ? .on : .off
+    }
+
+    @objc private func toggleLoginItem() { onToggleLoginItem?() }
     @objc private func openConfig() { onOpenConfig?() }
     @objc private func reload() { onReload?() }
     @objc private func quit() { NSApp.terminate(nil) }
