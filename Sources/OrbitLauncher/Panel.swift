@@ -22,16 +22,48 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
     private let table = NSTableView()
     private let scroll = NSScrollView()
     private let notice = NSTextField(wrappingLabelWithString: "")
+    private let modeLabel = NSTextField(labelWithString: "NORMAL")
     private let emptyLabel = NSTextField(labelWithString: "No matches")
     private var rows: [DisplayRow] = []
     private var theme = Theme()
     private var title = "Go"
+    private let rowIdentifier = NSUserInterfaceItemIdentifier("orbit-row")
+
+    // Constraints whose constants are theme-derived and updated on reload.
+    private var inputTop: NSLayoutConstraint!
+    private var inputLeading: NSLayoutConstraint!
+    private var inputTrailing: NSLayoutConstraint!
+    private var inputHeight: NSLayoutConstraint!
+    private var scrollTop: NSLayoutConstraint!
+    private var scrollLeading: NSLayoutConstraint!
+    private var scrollTrailing: NSLayoutConstraint!
+    private var scrollBottom: NSLayoutConstraint!
+    private var noticeLeading: NSLayoutConstraint!
+    private var noticeTrailing: NSLayoutConstraint!
+    private var noticeBottom: NSLayoutConstraint!
+    private var modeTrailing: NSLayoutConstraint!
+    private var modeWidth: NSLayoutConstraint!
+
+    /// Modal navigation. `mode` is meaningless while this is false — every key goes
+    /// straight to the field, exactly as before.
+    var vimEnabled = false {
+        didSet {
+            guard vimEnabled != oldValue else { return }
+            mode = .normal
+            refreshModeIndicator()
+        }
+    }
+    private var mode: InputMode = .normal
+    /// Held for the process lifetime: the panel controller is owned by the app
+    /// delegate and outlives every other object, so there is nothing to tear down.
+    private var keyMonitor: Any?
+
     var onQuery: ((String) -> Void)?
     var onActivate: ((DisplayRow) -> Void)?
     var onBack: (() -> Bool)?
 
     init() {
-        let panel = LauncherPanel(contentRect: NSRect(x: 0, y: 0, width: 430, height: 548), styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView], backing: .buffered, defer: false)
+        let panel = LauncherPanel(contentRect: NSRect(x: 0, y: 0, width: 380, height: 300), styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView], backing: .buffered, defer: false)
         panel.level = .popUpMenu
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
         panel.isFloatingPanel = true
@@ -43,17 +75,46 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
         panel.hasShadow = true
         super.init(window: panel)
         buildUI(panel)
+        apply(theme: theme)
+        installKeyMonitor()
+    }
+
+    /// Normal mode has to intercept plain characters, and `performKeyEquivalent` is
+    /// never sent for them — unmodified keys go straight to the field editor, which is
+    /// why the arrow/return handling lives in `doCommandBy`. A local key-down monitor
+    /// is the one hook that runs before the field editor sees the event.
+    private func installKeyMonitor() {
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            return MainActor.assumeIsolated { self.consumesInNormalMode(event) } ? nil : event
+        }
+    }
+
+    private func consumesInNormalMode(_ event: NSEvent) -> Bool {
+        guard vimEnabled, let panel = window, panel.isVisible, panel.isKeyWindow else { return false }
+        if event.keyCode == 53 {
+            // Escape leaves insert mode; in normal mode it keeps its usual meaning, so
+            // it is handed on to the existing cancelOperation path.
+            guard mode == .insert else { return false }
+            enterNormalMode()
+            return true
+        }
+        guard mode == .normal else { return false }
+        switch event.keyCode {
+        case 125, 126, 36, 76, 123: return false   // arrows and return keep working
+        default: return handleNormalMode(event)
+        }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     func show(route: String = "root") {
         guard let panel = window else { return }
-        if let screen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? NSScreen.main {
-            panel.setFrameOrigin(NSPoint(x: screen.visibleFrame.midX - panel.frame.width / 2, y: screen.visibleFrame.midY - panel.frame.height / 2 + 28))
-        }
         input.stringValue = ""
+        mode = .normal
+        refreshModeIndicator()
         updatePrompt()
+        resizeToContent()
         panel.orderFrontRegardless()
         panel.makeKey()
         panel.makeFirstResponder(input)
@@ -65,10 +126,16 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
         self.title = title
         self.rows = rows
         updatePrompt()
+        // Reload first: `resizeToContent` ends in `setFrame(display: true)`, which lays
+        // the table out synchronously and asks for row heights. Resizing before the
+        // reload asks with the table's previous, larger row count against the new,
+        // shorter `rows` — an out-of-bounds read whenever the list shrinks.
         table.reloadData()
+        resizeToContent()
         emptyLabel.isHidden = !rows.isEmpty
         if rows.isEmpty { table.deselectAll(nil) }
         else { table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false); table.scrollRowToVisible(0) }
+        repaintSelection()
     }
 
     func showNotice(_ message: String) {
@@ -79,41 +146,134 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
 
     func apply(theme: Theme) {
         self.theme = theme
-        blur.material = theme.blur > 0.5 ? .hudWindow : .menu
-        card.layer?.backgroundColor = theme.bg.withAlphaComponent(0.88).cgColor
+        blur.material = theme.blur > 0.66 ? .hudWindow : (theme.blur > 0.33 ? .menu : .windowBackground)
+        blur.alphaValue = theme.blur <= 0 ? 0 : 1
+
+        card.layer?.backgroundColor = theme.cardBackground.cgColor
         card.layer?.cornerRadius = theme.radius
         card.layer?.cornerCurve = .continuous
-        card.layer?.borderWidth = 1
-        card.layer?.borderColor = theme.border.cgColor
+        card.layer?.borderWidth = theme.borderWidth
+        card.layer?.borderColor = theme.borderColor.cgColor
+
+        let headingFont = theme.font(size: theme.headingSize, weight: theme.labelWeight)
         prompt.textColor = theme.fgMuted
-        prompt.font = font(size: theme.fontSize + 3, weight: .medium)
+        prompt.font = headingFont
         input.textColor = theme.fg
-        input.font = font(size: theme.fontSize + 3, weight: .medium)
-        notice.textColor = theme.fg
-        table.rowHeight = 48
+        input.font = headingFont
+
+        emptyLabel.textColor = theme.detailColor
+        emptyLabel.font = theme.font(size: theme.bodySize, weight: theme.detailWeight)
+
+        modeLabel.font = theme.font(size: theme.captionSize, weight: .semibold)
+        // Pinned to the wider of the two words so the field never jitters on a mode change.
+        modeWidth.constant = ("NORMAL" as NSString)
+            .size(withAttributes: [.font: modeLabel.font as Any]).width.rounded(.up)
+
+        notice.textColor = theme.bg
+        notice.font = theme.font(size: theme.smallSize, weight: theme.detailWeight)
+        notice.layer?.cornerRadius = theme.rowRadius
+
+        let padding = theme.space(theme.panelPadding)
+        inputTop.constant = padding
+        inputLeading.constant = padding + theme.space(theme.rowPaddingX)
+        inputTrailing.constant = -(padding + theme.space(theme.rowPaddingX))
+        inputHeight.constant = theme.headerHeight
+        scrollTop.constant = theme.space(theme.headerGap)
+        scrollLeading.constant = padding
+        scrollTrailing.constant = -padding
+        scrollBottom.constant = -padding
+        noticeLeading.constant = padding
+        noticeTrailing.constant = -padding
+        noticeBottom.constant = -padding
+        modeTrailing.constant = -(padding + theme.space(theme.rowPaddingX))
+        refreshModeIndicator()
+
+        table.intercellSpacing = NSSize(width: 0, height: theme.space(theme.rowGap))
+        table.rowHeight = theme.rowHeight(hasDetail: false)
         table.reloadData()
+        resizeToContent()
     }
+
+    // MARK: - Sizing
+
+    /// The card is content-sized like the omarchy menu: it shrinks to the rows it
+    /// holds and only scrolls once it hits the screen-fraction cap.
+    private func resizeToContent() {
+        guard let panel = window else { return }
+        let screen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? NSScreen.main
+        let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+
+        let padding = theme.space(theme.panelPadding)
+        let chrome = padding * 2 + theme.headerHeight + theme.space(theme.headerGap)
+        let cap = max(theme.headerHeight + padding * 2, visible.height * theme.maxHeight)
+        let height = min(chrome + contentHeight(), cap).rounded()
+        let width = min(theme.width, visible.width - padding * 2).rounded()
+
+        let origin = NSPoint(
+            x: (visible.midX - width / 2).rounded(),
+            y: (visible.midY - height / 2 + theme.offsetY).rounded()
+        )
+        panel.setFrame(NSRect(origin: origin, size: NSSize(width: width, height: height)), display: true)
+    }
+
+    private func contentHeight() -> CGFloat {
+        guard !rows.isEmpty else { return theme.rowHeight(hasDetail: false) }
+        let spacing = theme.space(theme.rowGap)
+        return rows.indices.reduce(CGFloat.zero) { total, index in total + height(ofRow: index) + spacing }
+    }
+
+    private func showsDetail(_ row: DisplayRow) -> Bool {
+        guard !row.detail.isEmpty else { return false }
+        switch theme.detailMode {
+        case "always": return true
+        case "never": return false
+        default: return !input.stringValue.isEmpty
+        }
+    }
+
+    private func height(ofRow index: Int) -> CGFloat {
+        // AppKit can ask about a row that no longer exists mid-reload.
+        guard rows.indices.contains(index) else { return theme.rowHeight(hasDetail: false) }
+        let row = rows[index]
+        let base = theme.rowHeight(hasDetail: showsDetail(row))
+        // The drilldown divider gets its own strip of height above the row it marks.
+        return row.section == "drilldown-start" && index > 0 ? base + theme.space(theme.dividerHeight) : base
+    }
+
+    // MARK: - Table
 
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let cell = RowView()
-        cell.configure(item: rows[row], theme: theme)
+        guard rows.indices.contains(row) else { return nil }
+        let cell = (tableView.makeView(withIdentifier: rowIdentifier, owner: self) as? RowView) ?? RowView(identifier: rowIdentifier)
+        cell.configure(item: rows[row], theme: theme, showDetail: showsDetail(rows[row]), showDivider: rows[row].section == "drilldown-start" && row > 0)
         cell.setSelected(row == table.selectedRow, theme: theme)
         return cell
     }
 
-    func tableViewSelectionDidChange(_ notification: Notification) {
-        for row in table.rows(in: table.visibleRect).integerRange {
-            (table.view(atColumn: 0, row: row, makeIfNecessary: false) as? RowView)?.setSelected(row == table.selectedRow, theme: theme)
+    func tableViewSelectionDidChange(_ notification: Notification) { repaintSelection() }
+
+    /// Selection is painted by the row itself, so every realized row has to be told.
+    /// `makeIfNecessary: false` keeps this to the handful the table has built.
+    private func repaintSelection() {
+        let selected = table.selectedRow
+        for row in rows.indices {
+            (table.view(atColumn: 0, row: row, makeIfNecessary: false) as? RowView)?.setSelected(row == selected, theme: theme)
         }
     }
 
-    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-        rows[row].detail.isEmpty || input.stringValue.isEmpty ? 48 : 58
-    }
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat { height(ofRow: row) }
+
+    // MARK: - Input
 
     func controlTextDidChange(_ obj: Notification) {
+        // Text reaching the field means we are typing: a dead key or IME commit can
+        // bypass the monitor, and the indicator must never claim NORMAL while it edits.
+        if vimEnabled, mode == .normal {
+            mode = .insert
+            refreshModeIndicator()
+        }
         updatePrompt()
         onQuery?(input.stringValue)
     }
@@ -136,8 +296,56 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
         case 126: moveSelection(-1); return true
         case 36, 76: activateSelection(); return true
         case 123 where input.stringValue.isEmpty: return goBack()
-        default: return false
+        default: break
         }
+        guard vimEnabled, mode == .normal else { return false }
+        return handleNormalMode(event)
+    }
+
+    private func handleNormalMode(_ event: NSEvent) -> Bool {
+        switch VimKeys.normalModeAction(characters: event.charactersIgnoringModifiers ?? "",
+                                        modifiers: event.modifierFlags) {
+        case .moveDown: moveSelection(1)
+        case .moveUp: moveSelection(-1)
+        case .beginSearch, .substitute: enterInsertMode(clearing: true)
+        case .insertAtCursor: enterInsertMode()
+        case .insertAtEnd: enterInsertMode(cursorAtEnd: true)
+        case .ignore: break
+        case .passThrough: return false
+        }
+        return true
+    }
+
+    private func enterNormalMode() {
+        mode = .normal
+        refreshModeIndicator()
+    }
+
+    private func enterInsertMode(clearing: Bool = false, cursorAtEnd: Bool = false) {
+        if clearing {
+            input.stringValue = ""
+            onQuery?("")
+        }
+        mode = .insert
+        window?.makeFirstResponder(input)
+        if let editor = input.currentEditor(), clearing || cursorAtEnd {
+            let end = (input.stringValue as NSString).length
+            editor.selectedRange = NSRange(location: end, length: 0)
+        }
+        refreshModeIndicator()
+        updatePrompt()
+    }
+
+    private func refreshModeIndicator() {
+        modeLabel.isHidden = !vimEnabled
+        guard vimEnabled else {
+            inputTrailing.constant = -(theme.space(theme.panelPadding) + theme.space(theme.rowPaddingX))
+            return
+        }
+        modeLabel.stringValue = mode == .normal ? "NORMAL" : "INSERT"
+        modeLabel.textColor = mode == .normal ? theme.fgMuted : theme.accent
+        inputTrailing.constant = -(theme.space(theme.panelPadding) + theme.space(theme.rowPaddingX)
+                                   + modeWidth.constant + theme.space(theme.iconGap))
     }
 
     private func escape() {
@@ -168,11 +376,7 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
 
     private func updatePrompt() {
         prompt.stringValue = input.stringValue.isEmpty ? "\(title)..." : ""
-        table.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<rows.count))
-    }
-
-    private func font(size: CGFloat, weight: NSFont.Weight) -> NSFont {
-        NSFont(name: theme.font, size: size) ?? .systemFont(ofSize: size, weight: weight)
+        if !rows.isEmpty { table.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<rows.count)) }
     }
 
     private func buildUI(_ panel: NSPanel) {
@@ -182,7 +386,7 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
         blur.wantsLayer = true
         card.wantsLayer = true
         [card].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; blur.addSubview($0) }
-        [prompt, input, scroll, emptyLabel, notice].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; card.addSubview($0) }
+        [prompt, input, scroll, emptyLabel, notice, modeLabel].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; card.addSubview($0) }
 
         input.isBordered = false
         input.isBezeled = false
@@ -196,9 +400,9 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
         table.headerView = nil
         table.backgroundColor = .clear
         table.selectionHighlightStyle = .none
-        table.intercellSpacing = NSSize(width: 0, height: 4)
         table.delegate = self
         table.dataSource = self
+        table.style = .plain
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("row"))
         column.resizingMask = .autoresizingMask
         table.addTableColumn(column)
@@ -207,23 +411,42 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
         scroll.documentView = table
         scroll.hasVerticalScroller = false
         scroll.drawsBackground = false
-        emptyLabel.textColor = theme.fgMuted
+        scroll.automaticallyAdjustsContentInsets = false
         emptyLabel.alignment = .center
         emptyLabel.isHidden = true
 
+        modeLabel.alignment = .right
+        modeLabel.isHidden = true
+
         notice.wantsLayer = true
         notice.layer?.backgroundColor = NSColor.systemRed.withAlphaComponent(0.92).cgColor
-        notice.layer?.cornerRadius = 8
         notice.alignment = .center
         notice.isHidden = true
 
+        inputTop = input.topAnchor.constraint(equalTo: card.topAnchor)
+        inputLeading = input.leadingAnchor.constraint(equalTo: card.leadingAnchor)
+        inputTrailing = input.trailingAnchor.constraint(equalTo: card.trailingAnchor)
+        inputHeight = input.heightAnchor.constraint(equalToConstant: 30)
+        scrollTop = scroll.topAnchor.constraint(equalTo: input.bottomAnchor)
+        scrollLeading = scroll.leadingAnchor.constraint(equalTo: card.leadingAnchor)
+        scrollTrailing = scroll.trailingAnchor.constraint(equalTo: card.trailingAnchor)
+        scrollBottom = scroll.bottomAnchor.constraint(equalTo: card.bottomAnchor)
+        noticeLeading = notice.leadingAnchor.constraint(equalTo: card.leadingAnchor)
+        noticeTrailing = notice.trailingAnchor.constraint(equalTo: card.trailingAnchor)
+        noticeBottom = notice.bottomAnchor.constraint(equalTo: card.bottomAnchor)
+        modeTrailing = modeLabel.trailingAnchor.constraint(equalTo: card.trailingAnchor)
+        modeWidth = modeLabel.widthAnchor.constraint(equalToConstant: 48)
+
         NSLayoutConstraint.activate([
-            card.leadingAnchor.constraint(equalTo: blur.leadingAnchor), card.trailingAnchor.constraint(equalTo: blur.trailingAnchor), card.topAnchor.constraint(equalTo: blur.topAnchor), card.bottomAnchor.constraint(equalTo: blur.bottomAnchor),
-            input.topAnchor.constraint(equalTo: card.topAnchor, constant: 18), input.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 22), input.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -22), input.heightAnchor.constraint(equalToConstant: 34),
+            card.leadingAnchor.constraint(equalTo: blur.leadingAnchor), card.trailingAnchor.constraint(equalTo: blur.trailingAnchor),
+            card.topAnchor.constraint(equalTo: blur.topAnchor), card.bottomAnchor.constraint(equalTo: blur.bottomAnchor),
+            inputTop, inputLeading, inputTrailing, inputHeight,
             prompt.leadingAnchor.constraint(equalTo: input.leadingAnchor), prompt.trailingAnchor.constraint(equalTo: input.trailingAnchor), prompt.centerYAnchor.constraint(equalTo: input.centerYAnchor),
-            scroll.topAnchor.constraint(equalTo: input.bottomAnchor, constant: 13), scroll.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 12), scroll.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12), scroll.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -12),
-            emptyLabel.centerXAnchor.constraint(equalTo: card.centerXAnchor), emptyLabel.centerYAnchor.constraint(equalTo: card.centerYAnchor),
-            notice.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 14), notice.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -14), notice.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -14), notice.heightAnchor.constraint(greaterThanOrEqualToConstant: 38),
+            scrollTop, scrollLeading, scrollTrailing, scrollBottom,
+            emptyLabel.centerXAnchor.constraint(equalTo: card.centerXAnchor), emptyLabel.centerYAnchor.constraint(equalTo: scroll.centerYAnchor),
+            modeTrailing, modeWidth, modeLabel.centerYAnchor.constraint(equalTo: input.centerYAnchor),
+            noticeLeading, noticeTrailing, noticeBottom,
+            notice.heightAnchor.constraint(greaterThanOrEqualToConstant: 32),
         ])
     }
 
@@ -232,79 +455,154 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
 
 final class RowView: NSTableCellView {
     private let selectionBackground = NSView()
-    private let divider = NSBox()
+    private let selectionBar = NSView()
+    private let divider = NSView()
     private let iconView = NSImageView()
     private let symbol = NSImageView()
     private let label = NSTextField(labelWithString: "")
     private let detail = NSTextField(labelWithString: "")
+    private let column = NSStackView()
     private let chevron = NSImageView(image: NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil) ?? NSImage())
     private var theme = Theme()
+
+    private var selectionTop: NSLayoutConstraint!
+    private var selectionLeading: NSLayoutConstraint!
+    private var selectionTrailing: NSLayoutConstraint!
+    private var dividerHeight: NSLayoutConstraint!
+    private var dividerTop: NSLayoutConstraint!
+    private var columnTrailing: NSLayoutConstraint!
+    private var barWidth: NSLayoutConstraint!
+    private var barLeading: NSLayoutConstraint!
+    private var iconLeading: NSLayoutConstraint!
+    private var iconWidth: NSLayoutConstraint!
+    private var iconHeight: NSLayoutConstraint!
+    private var symbolLeading: NSLayoutConstraint!
+    private var symbolWidth: NSLayoutConstraint!
+    private var symbolHeight: NSLayoutConstraint!
+    private var columnLeading: NSLayoutConstraint!
+    private var chevronTrailing: NSLayoutConstraint!
+    private var chevronWidth: NSLayoutConstraint!
+
+    convenience init(identifier: NSUserInterfaceItemIdentifier) {
+        self.init(frame: .zero)
+        self.identifier = identifier
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        selectionBackground.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(selectionBackground)
-        [divider, iconView, symbol, label, detail, chevron].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; addSubview($0) }
-        selectionBackground.wantsLayer = true
-        divider.boxType = .separator
+        [selectionBackground, divider].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; $0.wantsLayer = true; addSubview($0) }
+        [selectionBar, iconView, symbol, column, chevron].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; addSubview($0) }
+        selectionBar.wantsLayer = true
+
         iconView.imageScaling = .scaleProportionallyUpOrDown
         detail.lineBreakMode = .byTruncatingTail
+        label.lineBreakMode = .byTruncatingTail
+
+        column.orientation = .vertical
+        column.alignment = .leading
+        column.distribution = .fill
+        column.setViews([label, detail], in: .top)
+        column.setHuggingPriority(.defaultHigh, for: .vertical)
+        // Long labels truncate inside the column instead of pushing the chevron out.
+        [label, detail].forEach {
+            $0.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            $0.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        }
+
+        selectionTop = selectionBackground.topAnchor.constraint(equalTo: topAnchor)
+        selectionLeading = selectionBackground.leadingAnchor.constraint(equalTo: leadingAnchor)
+        selectionTrailing = selectionBackground.trailingAnchor.constraint(equalTo: trailingAnchor)
+        dividerHeight = divider.heightAnchor.constraint(equalToConstant: 1)
+        dividerTop = divider.topAnchor.constraint(equalTo: topAnchor)
+        columnTrailing = column.trailingAnchor.constraint(lessThanOrEqualTo: chevron.leadingAnchor)
+        barWidth = selectionBar.widthAnchor.constraint(equalToConstant: 0)
+        barLeading = selectionBar.leadingAnchor.constraint(equalTo: selectionBackground.leadingAnchor)
+        iconLeading = iconView.leadingAnchor.constraint(equalTo: selectionBackground.leadingAnchor)
+        iconWidth = iconView.widthAnchor.constraint(equalToConstant: 24)
+        iconHeight = iconView.heightAnchor.constraint(equalToConstant: 24)
+        symbolLeading = symbol.leadingAnchor.constraint(equalTo: selectionBackground.leadingAnchor)
+        symbolWidth = symbol.widthAnchor.constraint(equalToConstant: 18)
+        symbolHeight = symbol.heightAnchor.constraint(equalToConstant: 18)
+        columnLeading = column.leadingAnchor.constraint(equalTo: leadingAnchor)
+        chevronTrailing = chevron.trailingAnchor.constraint(equalTo: selectionBackground.trailingAnchor)
+        chevronWidth = chevron.widthAnchor.constraint(equalToConstant: 9)
+
         NSLayoutConstraint.activate([
-            selectionBackground.leadingAnchor.constraint(equalTo: leadingAnchor), selectionBackground.trailingAnchor.constraint(equalTo: trailingAnchor), selectionBackground.topAnchor.constraint(equalTo: topAnchor), selectionBackground.bottomAnchor.constraint(equalTo: bottomAnchor),
-            divider.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4), divider.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4), divider.topAnchor.constraint(equalTo: topAnchor),
-            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12), iconView.centerYAnchor.constraint(equalTo: centerYAnchor), iconView.widthAnchor.constraint(equalToConstant: 28), iconView.heightAnchor.constraint(equalToConstant: 28),
-            symbol.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 15), symbol.centerYAnchor.constraint(equalTo: centerYAnchor), symbol.widthAnchor.constraint(equalToConstant: 21), symbol.heightAnchor.constraint(equalToConstant: 21),
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 51), label.topAnchor.constraint(equalTo: topAnchor, constant: 7), label.trailingAnchor.constraint(lessThanOrEqualTo: chevron.leadingAnchor, constant: -8),
-            detail.leadingAnchor.constraint(equalTo: label.leadingAnchor), detail.topAnchor.constraint(equalTo: label.bottomAnchor), detail.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -32),
-            chevron.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12), chevron.centerYAnchor.constraint(equalTo: centerYAnchor), chevron.widthAnchor.constraint(equalToConstant: 9),
+            selectionTop, selectionLeading, selectionTrailing,
+            selectionBackground.bottomAnchor.constraint(equalTo: bottomAnchor),
+            divider.leadingAnchor.constraint(equalTo: leadingAnchor), divider.trailingAnchor.constraint(equalTo: trailingAnchor),
+            dividerTop, dividerHeight,
+            barWidth, barLeading,
+            selectionBar.centerYAnchor.constraint(equalTo: selectionBackground.centerYAnchor),
+            selectionBar.heightAnchor.constraint(equalTo: selectionBackground.heightAnchor, multiplier: 0.55),
+            iconLeading, iconWidth, iconHeight, iconView.centerYAnchor.constraint(equalTo: selectionBackground.centerYAnchor),
+            symbolLeading, symbolWidth, symbolHeight, symbol.centerYAnchor.constraint(equalTo: selectionBackground.centerYAnchor),
+            columnLeading, column.centerYAnchor.constraint(equalTo: selectionBackground.centerYAnchor), columnTrailing,
+            chevronTrailing, chevronWidth, chevron.centerYAnchor.constraint(equalTo: selectionBackground.centerYAnchor),
         ])
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func configure(item: DisplayRow, theme: Theme) {
+    func configure(item: DisplayRow, theme: Theme, showDetail: Bool, showDivider: Bool) {
         self.theme = theme
+
+        let dividerStrip = showDivider ? theme.space(theme.dividerHeight) : 0
+        selectionTop.constant = dividerStrip
+        dividerTop.constant = (dividerStrip / 2).rounded()
+        dividerHeight.constant = showDivider ? 1 : 0
+        divider.isHidden = !showDivider
+        divider.layer?.backgroundColor = theme.dividerColor.cgColor
+
+        let inset = theme.space(theme.selectionInset)
+        selectionLeading.constant = inset
+        selectionTrailing.constant = -inset
+
+        let gutter = theme.space(theme.rowPaddingX)
+        let slot = theme.space(theme.iconSlot)
+        barWidth.constant = theme.space(theme.selectionBar)
+        barLeading.constant = 0
+        columnLeading.constant = inset + theme.labelInset
+        chevronTrailing.constant = -gutter
+        chevronWidth.constant = theme.captionSize
+        columnTrailing.constant = -theme.space(theme.iconGap)
+
         iconView.image = item.image
         iconView.isHidden = item.image == nil
+        iconWidth.constant = theme.iconSize + theme.space(6)
+        iconHeight.constant = theme.iconSize + theme.space(6)
+        iconLeading.constant = gutter + (slot - iconWidth.constant) / 2
+
         symbol.image = item.image == nil && !item.symbol.isEmpty ? NSImage(systemSymbolName: item.symbol, accessibilityDescription: nil) : nil
-        symbol.contentTintColor = theme.fg
         symbol.isHidden = symbol.image == nil
+        symbolWidth.constant = theme.iconSize
+        symbolHeight.constant = theme.iconSize
+        symbolLeading.constant = gutter + (slot - theme.iconSize) / 2
+
         label.stringValue = item.label
-        label.textColor = theme.fg
-        label.font = NSFont(name: theme.font, size: theme.fontSize) ?? .systemFont(ofSize: theme.fontSize, weight: .medium)
+        label.font = theme.font(size: theme.bodySize, weight: theme.labelWeight)
         detail.stringValue = item.detail
-        detail.textColor = theme.fgMuted
-        detail.font = NSFont(name: theme.font, size: theme.fontSize - 3) ?? .systemFont(ofSize: theme.fontSize - 3)
-        detail.isHidden = item.detail.isEmpty
-        chevron.contentTintColor = theme.fgMuted
-        chevron.isHidden = item.kind != .menu
-        divider.isHidden = item.section != "drilldown-start"
-        layer?.cornerRadius = max(8, theme.radius - 7)
-        layer?.cornerCurve = .continuous
-        selectionBackground.layer?.cornerRadius = max(8, theme.radius - 7)
+        detail.font = theme.font(size: theme.smallSize, weight: theme.detailWeight)
+        detail.isHidden = !showDetail
+        column.spacing = theme.space(theme.labelGap)
+
+        selectionBackground.layer?.cornerRadius = theme.rowRadius
         selectionBackground.layer?.cornerCurve = .continuous
-        setSelected(false, theme: theme)
+        selectionBar.layer?.cornerRadius = min(theme.rowRadius, barWidth.constant / 2)
+        chevron.isHidden = item.kind != .menu
+        layer?.cornerRadius = theme.rowRadius
+        layer?.cornerCurve = .continuous
     }
 
-    override var backgroundStyle: NSView.BackgroundStyle {
-        didSet {}
-    }
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        setSelected(false, theme: theme)
-    }
-
+    /// Omarchy's selection: a low-alpha fill plus accent-tinted text, rather than an
+    /// inverted accent slab.
     func setSelected(_ selected: Bool, theme: Theme) {
-        selectionBackground.layer?.backgroundColor = selected ? theme.accent.withAlphaComponent(0.9).cgColor : NSColor.clear.cgColor
-        label.textColor = selected ? theme.bg : theme.fg
-        detail.textColor = selected ? theme.bg.withAlphaComponent(0.72) : theme.fgMuted
-        symbol.contentTintColor = selected ? theme.bg : theme.fg
-        chevron.contentTintColor = selected ? theme.bg.withAlphaComponent(0.8) : theme.fgMuted
+        selectionBackground.layer?.backgroundColor = selected ? theme.selectionFill.cgColor : NSColor.clear.cgColor
+        selectionBar.layer?.backgroundColor = selected ? theme.selectionText.cgColor : NSColor.clear.cgColor
+        label.textColor = selected ? theme.selectionText : theme.fg
+        detail.textColor = selected ? theme.selectionText.withAlphaComponent(theme.detailAlpha) : theme.detailColor
+        symbol.contentTintColor = selected ? theme.selectionText : theme.fg
+        chevron.contentTintColor = selected ? theme.selectionText : theme.chevronColor
     }
-}
-
-private extension NSRange {
-    var integerRange: Range<Int> { location..<(location + length) }
 }

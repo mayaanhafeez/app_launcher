@@ -8,6 +8,8 @@ final class MenuController {
     private var activeMenu = "root"
     private var navigation: [String] = []
     private var providerGeneration = 0
+    private var query = ""
+    private var iconCache: [String: NSImage] = [:]
     var onRows: ((String, [DisplayRow]) -> Void)?
     var onNotice: ((String) -> Void)?
     var onDismiss: (() -> Void)?
@@ -17,7 +19,10 @@ final class MenuController {
         self.runtime = runtime
         runtime.onReload = { [weak self] result in
             switch result {
-            case .success(let nodes): self?.nodes = nodes; self?.refresh(query: "")
+            case .success(let nodes):
+                self?.iconCache = [:]
+                self?.nodes = nodes
+                self?.refresh(query: "")
             case .failure(let error): self?.onNotice?(error.localizedDescription)
             }
         }
@@ -38,16 +43,22 @@ final class MenuController {
             onDismiss?()
             return
         }
+        // Provider rows have no backing node; they carry their action inline.
+        if let action = row.action {
+            runtime.invoke(scriptAction: action, query: query)
+            onDismiss?()
+            return
+        }
         guard let node = nodes.first(where: { $0.id == row.id }) else { return }
         if node.kind == .menu {
             navigation.append(activeMenu)
             activeMenu = node.id
             refresh(query: "")
         } else if let reference = node.actionReference {
-            runtime.invoke(reference: reference)
+            runtime.invoke(reference: reference, query: query)
             onDismiss?()
         } else if let scriptAction = node.scriptAction {
-            runtime.invoke(scriptAction: scriptAction)
+            runtime.invoke(scriptAction: scriptAction, query: query)
             onDismiss?()
         }
     }
@@ -60,20 +71,40 @@ final class MenuController {
     }
 
     func invoke(id: String) -> Bool {
-        guard let node = nodes.first(where: { $0.id.caseInsensitiveCompare(id) == .orderedSame }) else { return false }
+        guard let node = node(matching: id) else { return false }
         if let reference = node.actionReference { runtime.invoke(reference: reference) }
         else if let scriptAction = node.scriptAction { runtime.invoke(scriptAction: scriptAction) }
         else { return false }
         return true
     }
 
+    /// An exact id wins over any alias, matching how routes resolve in `orbitctl`.
+    private func node(matching route: String) -> MenuNode? {
+        let needle = route.lowercased().replacingOccurrences(of: "_", with: "-")
+        if let exact = nodes.first(where: { $0.id.lowercased() == needle }) { return exact }
+        return nodes.first { node in
+            node.aliases.contains { $0.lowercased().replacingOccurrences(of: "_", with: "-") == needle }
+        }
+    }
+
     private func resolve(_ route: String) -> String {
-        nodes.contains(where: { $0.id.caseInsensitiveCompare(route) == .orderedSame && $0.kind == .menu }) ? route : "root"
+        guard let node = node(matching: route), node.kind == .menu else { return "root" }
+        return node.id
+    }
+
+    private func icon(for node: MenuNode) -> NSImage? {
+        guard !node.iconPath.isEmpty else { return nil }
+        if let cached = iconCache[node.iconPath] { return cached }
+        guard let image = NSImage(contentsOfFile: (node.iconPath as NSString).expandingTildeInPath) else { return nil }
+        iconCache[node.iconPath] = image
+        return image
     }
 
     private func refresh(query: String) {
-        let title = nodes.first(where: { $0.id == activeMenu })?.label ?? "Go"
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = self.query
+        let activeNode = nodes.first(where: { $0.id == activeMenu })
+        let title = activeNode?.headerTitle ?? "Go"
         var rows: [DisplayRow] = []
         if activeMenu == "apps" {
             rows.append(contentsOf: appIndex.results(for: trimmed, limit: trimmed.isEmpty ? appIndex.entries.count : 40))
@@ -85,9 +116,9 @@ final class MenuController {
             return node.id != "root" && isDescendant(node, of: activeMenu)
         }
         rows.append(contentsOf: candidates.compactMap { node in
-            let score = trimmed.isEmpty ? node.order : FuzzyMatcher.score(trimmed, in: "\(node.label) \(node.detail) \(node.id)")
+            let score = trimmed.isEmpty ? node.order : FuzzyMatcher.score(trimmed, in: node.searchText)
             guard let score else { return nil }
-            return DisplayRow(id: node.id, kind: node.kind, label: node.label, detail: trimmed.isEmpty ? node.detail : path(for: node), symbol: node.symbol, image: nil, score: score, section: node.parent == activeMenu ? "current" : "drilldown")
+            return DisplayRow(id: node.id, kind: node.kind, label: node.label, detail: trimmed.isEmpty ? node.detail : path(for: node), symbol: node.symbol, image: icon(for: node), score: score, section: node.parent == activeMenu ? "current" : "drilldown")
         })
         if trimmed.isEmpty {
             rows.sort { activeMenu == "apps" ? $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending : $0.score < $1.score }
@@ -99,23 +130,26 @@ final class MenuController {
                 return $0.score == $1.score ? $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending : $0.score < $1.score
             }
             if let split = rows.firstIndex(where: { $0.section != "current" }), split > 0 {
-                let row = rows[split]
-                rows[split] = DisplayRow(id: row.id, kind: row.kind, label: row.label, detail: row.detail, symbol: row.symbol, image: row.image, score: row.score, section: "drilldown-start")
+                var row = rows[split]
+                row = DisplayRow(id: row.id, kind: row.kind, label: row.label, detail: row.detail, symbol: row.symbol, image: row.image, score: row.score, section: "drilldown-start", action: row.action)
+                rows[split] = row
             }
         }
         let baseRows = rows
         onRows?(title, baseRows)
-        let providerNames = Set(candidates.compactMap(\.provider))
+
+        // A provider belongs to the submenu that declares it and supplies that
+        // submenu's rows while it is open — entering `search` is what runs `search`'s
+        // provider, not merely seeing it listed one level up.
         providerGeneration += 1
         let generation = providerGeneration
-        for name in providerNames {
-            runtime.provider(name: name, query: trimmed) { [weak self] result in
-                DispatchQueue.main.async {
-                    guard let self, generation == self.providerGeneration else { return }
-                    switch result {
-                    case .success(let providerRows): self.onRows?(title, baseRows + providerRows)
-                    case .failure(let error): self.onNotice?(error.localizedDescription)
-                    }
+        guard let name = activeNode?.provider else { return }
+        runtime.provider(name: name, menuID: activeMenu, query: trimmed) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self, generation == self.providerGeneration else { return }
+                switch result {
+                case .success(let providerRows): self.onRows?(title, baseRows + providerRows)
+                case .failure(let error): self.onNotice?(error.localizedDescription)
                 }
             }
         }

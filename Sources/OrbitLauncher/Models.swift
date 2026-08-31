@@ -8,24 +8,73 @@ enum RowKind: String, Sendable {
     case separator
 }
 
-struct MenuNode: Sendable {
-    let id: String
-    let parent: String
-    let kind: RowKind
-    let label: String
-    let detail: String
-    let symbol: String
-    let provider: String?
-    let actionReference: Int32?
-    let scriptAction: ScriptAction?
-    let order: Int
-}
-
+/// An action described by Lua and executed by the host. Provider states have no
+/// execution globals, so a provider row *describes* what to run and the host runs
+/// it — that is what keeps dynamic rows sandboxed but still actionable.
 enum ScriptAction: Sendable {
     case shell(String)
     case appleScript(String)
     case open(String)
     case url(String)
+
+    static let queryToken = "{query}"
+
+    private var template: String {
+        switch self {
+        case .shell(let value), .appleScript(let value), .open(let value), .url(let value): return value
+        }
+    }
+
+    var wantsQuery: Bool { template.contains(Self.queryToken) }
+
+    /// Substitutes the live query into `{query}`, escaped for the destination.
+    /// Shell values arrive already single-quoted, so `brew install {query}` is safe
+    /// to write bare.
+    func resolved(query: String) -> ScriptAction {
+        guard wantsQuery else { return self }
+        switch self {
+        case .shell(let value): return .shell(value.replacingOccurrences(of: Self.queryToken, with: Self.shellQuoted(query)))
+        case .appleScript(let value): return .appleScript(value.replacingOccurrences(of: Self.queryToken, with: Self.appleScriptQuoted(query)))
+        case .open(let value): return .open(value.replacingOccurrences(of: Self.queryToken, with: query))
+        case .url(let value): return .url(value.replacingOccurrences(of: Self.queryToken, with: Self.urlEncoded(query)))
+        }
+    }
+
+    static func shellQuoted(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    static func appleScriptQuoted(_ value: String) -> String {
+        value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
+    static func urlEncoded(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? value
+    }
+}
+
+struct MenuNode: Sendable {
+    let id: String
+    let parent: String
+    let kind: RowKind
+    let label: String
+    /// Header text while this submenu is open. Defaults to `label`.
+    var title: String = ""
+    let detail: String
+    let symbol: String
+    /// Path to a custom image, `~` allowed. Wins over `symbol` when set.
+    var iconPath: String = ""
+    /// Extra route names for `orbitctl show <alias>`; also searchable.
+    var aliases: [String] = []
+    let provider: String?
+    let actionReference: Int32?
+    let scriptAction: ScriptAction?
+    let order: Int
+
+    var headerTitle: String { title.isEmpty ? label : title }
+    /// Leaf id segment, so `install.editor.zed` is findable by typing "zed".
+    var leafID: String { String(id.split(separator: ".").last ?? "") }
+    var searchText: String { "\(label) \(detail) \(leafID) \(aliases.joined(separator: " "))" }
 }
 
 struct DisplayRow: @unchecked Sendable {
@@ -37,6 +86,8 @@ struct DisplayRow: @unchecked Sendable {
     let image: NSImage?
     let score: Int
     let section: String
+    /// Set on provider rows, which have no backing `MenuNode` to look up.
+    var action: ScriptAction? = nil
 }
 
 struct AppEntry: @unchecked Sendable {
@@ -47,19 +98,170 @@ struct AppEntry: @unchecked Sendable {
     let icon: NSImage
 }
 
+/// Global hotkey, configurable from `config.lua`.
+struct HotKeySpec: Sendable, Equatable {
+    var key: String = "space"
+    var modifiers: [String] = ["option"]
+}
+
+struct Settings: Sendable {
+    var hotKey = HotKeySpec()
+    /// Modal navigation, off unless `vim = true` in config.lua.
+    var vimMode = false
+}
+
+// MARK: - Vim mode
+
+enum InputMode: Sendable {
+    case normal
+    case insert
+}
+
+/// What a normal-mode key press means. Kept free of AppKit state so the key map is
+/// testable on its own.
+enum VimAction: Equatable, Sendable {
+    case moveDown
+    case moveUp
+    /// `/` — clear the query and start typing.
+    case beginSearch
+    /// `i` — resume typing where the cursor was left.
+    case insertAtCursor
+    /// `a` — append at the end of the query.
+    case insertAtEnd
+    /// `s` — replace the query and start typing.
+    case substitute
+    /// Normal mode swallows unmapped keys, so letters never reach the field.
+    case ignore
+    /// Modified keys stay with AppKit so system shortcuts keep working.
+    case passThrough
+}
+
+enum VimKeys {
+    static func normalModeAction(characters: String, modifiers: NSEvent.ModifierFlags) -> VimAction {
+        if !modifiers.intersection([.command, .control, .function]).isEmpty { return .passThrough }
+        switch characters {
+        case "j": return .moveDown
+        case "k": return .moveUp
+        case "/": return .beginSearch
+        case "i": return .insertAtCursor
+        case "a": return .insertAtEnd
+        case "s": return .substitute
+        default: return .ignore
+        }
+    }
+}
+
+// MARK: - Theme
+
+/// Every value the panel draws with. Layout is native, so this token set *is* the
+/// entire appearance surface — anything hardcoded in Panel.swift is a value the
+/// user can never reach, which is why spacing, sizing and typography all live here.
 struct Theme: Sendable {
+    // Palette
     var bg = NSColor(hex: "17191f")
     var surface = NSColor(hex: "22252d")
-    var accent = NSColor(hex: "7aa2f7")
     var fg = NSColor(hex: "d8dee9")
     var fgMuted = NSColor(hex: "7f8490")
+    var accent = NSColor(hex: "7aa2f7")
     var border = NSColor(hex: "3b3f4a")
-    var radius: CGFloat = 18
-    var rowHeight: CGFloat = 56
-    var padding: CGFloat = 18
-    var font = "SF Pro"
-    var fontSize: CGFloat = 15
-    var blur = 0.82
+    var selectionBg: NSColor? = nil
+    var selectionFg: NSColor? = nil
+
+    // Alphas, composed onto the palette rather than baked into it
+    var bgAlpha: CGFloat = 0.82
+    var borderAlpha: CGFloat = 1
+    var selectionAlpha: CGFloat = 0.10
+    var detailAlpha: CGFloat = 0.55
+    var chevronAlpha: CGFloat = 0.36
+    var dividerAlpha: CGFloat = 0.20
+    var blur: Double = 0.82
+
+    // Geometry
+    var radius: CGFloat = 12
+    var rowRadius: CGFloat = 8
+    var width: CGFloat = 380
+    /// Cap on panel height as a fraction of the visible screen.
+    var maxHeight: CGFloat = 0.6
+    var borderWidth: CGFloat = 1
+    var offsetY: CGFloat = 28
+
+    // Spacing, all multiplied by `spacingScale`
+    var spacingScale: CGFloat = 1
+    var panelPadding: CGFloat = 12
+    var rowGap: CGFloat = 2
+    var rowPaddingX: CGFloat = 10
+    var iconSlot: CGFloat = 34
+    var iconGap: CGFloat = 8
+    var labelGap: CGFloat = 1
+    var rowHeight: CGFloat = 44
+    var rowHeightDetail: CGFloat = 56
+    var dividerHeight: CGFloat = 15
+    var headerGap: CGFloat = 8
+    var selectionInset: CGFloat = 0
+    var selectionBar: CGFloat = 0
+
+    // Typography — one base size with a proportional scale, so `font_size` alone
+    // rescales the whole panel coherently.
+    var family = ""
+    var fontSize: CGFloat = 13
+    /// When the detail line renders: "search" (omarchy's behavior), "always", "never".
+    var detailMode = "search"
+    var labelWeight: NSFont.Weight = .medium
+    var detailWeight: NSFont.Weight = .regular
+}
+
+extension Theme {
+    func space(_ value: CGFloat) -> CGFloat { value <= 0 ? 0 : max(1, (value * spacingScale).rounded()) }
+
+    private func scaled(_ multiplier: CGFloat) -> CGFloat { max(1, (fontSize * multiplier).rounded()) }
+
+    var captionSize: CGFloat { scaled(0.833) }
+    var smallSize: CGFloat { scaled(0.917) }
+    var bodySize: CGFloat { scaled(1.0) }
+    var titleSize: CGFloat { scaled(1.167) }
+    var headingSize: CGFloat { scaled(1.333) }
+    var iconSize: CGFloat { scaled(1.5) }
+
+    var selectionFill: NSColor { (selectionBg ?? fg).withAlphaComponent(selectionAlpha) }
+    var selectionText: NSColor { selectionFg ?? accent }
+    var cardBackground: NSColor { bg.withAlphaComponent(bgAlpha) }
+    var borderColor: NSColor { border.withAlphaComponent(borderAlpha) }
+    var detailColor: NSColor { fgMuted.withAlphaComponent(detailAlpha) }
+    var chevronColor: NSColor { fg.withAlphaComponent(chevronAlpha) }
+    var dividerColor: NSColor { fg.withAlphaComponent(dividerAlpha) }
+
+    var headerHeight: CGFloat { max(space(30), headingSize + space(12)) }
+    /// Leading edge of the label column: icon slot plus its gutters.
+    var labelInset: CGFloat { space(rowPaddingX) + space(iconSlot) + space(iconGap) }
+
+    func rowHeight(hasDetail: Bool) -> CGFloat { space(hasDetail ? rowHeightDetail : rowHeight) }
+
+    /// Resolves the themed family, falling back to the system font. A named family
+    /// keeps its requested weight instead of silently dropping to regular.
+    func font(size: CGFloat, weight: NSFont.Weight) -> NSFont {
+        guard !family.isEmpty, let base = NSFont(name: family, size: size) else {
+            return .systemFont(ofSize: size, weight: weight)
+        }
+        let descriptor = base.fontDescriptor.addingAttributes([
+            .traits: [NSFontDescriptor.TraitKey.weight: weight.rawValue]
+        ])
+        return NSFont(descriptor: descriptor, size: size) ?? base
+    }
+
+    static func weight(named name: String) -> NSFont.Weight? {
+        switch name.lowercased() {
+        case "ultralight": return .ultraLight
+        case "thin": return .thin
+        case "light": return .light
+        case "regular", "normal": return .regular
+        case "medium": return .medium
+        case "semibold": return .semibold
+        case "bold": return .bold
+        case "heavy": return .heavy
+        case "black": return .black
+        default: return nil
+        }
+    }
 }
 
 extension NSColor {
@@ -96,4 +298,8 @@ enum FuzzyMatcher {
         }
         return max(0, score + haystack.count / 12)
     }
+}
+
+extension String {
+    var isBlank: Bool { trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 }

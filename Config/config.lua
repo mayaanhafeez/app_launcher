@@ -1,3 +1,18 @@
+-- OrbitLauncher config. Copy to ~/.config/orbit/config.lua.
+-- Reloads on save. `~/.config/orbit` is on package.path, so this behaves like a
+-- Neovim config: split it up and `require` the pieces.
+--
+-- Item fields:
+--   id / parent   dotted ids infer the parent; an item with no action is a submenu
+--   label         row text            title    header text when open (defaults to label)
+--   detail        subtitle            symbol   SF Symbol name
+--   icon          image file path     aliases  extra route names, also searchable
+--   provider      name of a function in `providers` that supplies rows at query time
+--   shell | applescript | open | url | action(query)
+--
+-- Any of shell/applescript/open/url may contain {query}, replaced by what is typed
+-- and escaped for its destination. `action` handlers receive it as an argument.
+
 local function item(id, label, fields)
   fields = fields or {}
   fields.id = id
@@ -6,17 +21,20 @@ local function item(id, label, fields)
 end
 
 local items = {
-  item("root", "Go"),
-  item("apps", "Apps", { detail = "Installed applications", symbol = "square.grid.2x2" }),
+  -- A provider on `root` runs on every keystroke at the top level, so its rows
+  -- appear next to the app results: a calculator, base conversion, web fallbacks.
+  item("root", "Go", { provider = "smart" }),
+  item("apps", "Apps", { detail = "Installed applications", symbol = "square.grid.2x2", aliases = { "app", "applications" } }),
   item("learn", "Learn", { symbol = "book" }),
   item("trigger", "Trigger", { symbol = "bolt" }),
   item("style", "Style", { symbol = "paintpalette" }),
-  item("setup", "Setup", { symbol = "gearshape" }),
-  item("install", "Install", { symbol = "square.and.arrow.down" }),
-  item("remove", "Remove", { symbol = "trash" }),
+  item("setup", "Setup", { symbol = "gearshape", aliases = { "settings" } }),
+  -- Typing inside Install offers to install what you typed (see plugins/brew.lua).
+  item("install", "Install", { symbol = "square.and.arrow.down", provider = "brew" }),
+  item("remove", "Remove", { symbol = "trash", aliases = { "uninstall" } }),
   item("update", "Update", { symbol = "arrow.clockwise" }),
   item("about", "About", { symbol = "info.circle", url = "https://github.com/mayaanhafeez/app_launcher" }),
-  item("system", "System", { symbol = "power" }),
+  item("system", "System", { symbol = "power", title = "Session", aliases = { "power", "power-menu" } }),
 
   item("system.screensaver", "Screensaver", { shell = "open -a ScreenSaverEngine" }),
   item("system.lock", "Lock", { shell = "/System/Library/CoreServices/Menu\\ Extras/User.menu/Contents/Resources/CGSession -suspend || pmset displaysleepnow" }),
@@ -61,6 +79,8 @@ local items = {
   item("setup.config", "Orbit Config", { shell = "${EDITOR:-nano} ~/.config/orbit/config.lua" }),
   item("setup.theme", "Orbit Theme", { shell = "${EDITOR:-nano} ~/.config/orbit/theme.lua" }),
 
+  item("search", "Search", { symbol = "magnifyingglass", provider = "websearch", detail = "Type, then pick a destination" }),
+
   item("install.formula", "Homebrew Formula", { shell = "read -r '?Formula: ' name; [[ -n $name ]] && brew install --formula $name" }),
   item("install.cask", "Homebrew App", { shell = "read -r '?Cask: ' name; [[ -n $name ]] && brew install --cask $name" }),
   item("install.update", "Update Homebrew", { shell = "brew update" }),
@@ -93,4 +113,42 @@ local items = {
   item("update.reload", "Reload Lua Config", { shell = "~/.config/orbit/reload 2>/dev/null || true" }),
 }
 
-return { items = items, providers = {} }
+-- Plugins. Anything in ~/.config/orbit/plugins/ that returns { items = ..., providers = ... }.
+local providers = {
+  -- A provider is called with the current query and returns rows. It runs in an
+  -- isolated state with no terminal/osascript/io, on a 0.15s budget, so it must be a
+  -- pure function of the query — it *describes* an action and the host runs it.
+  websearch = function(query)
+    if query == "" then return {} end
+    return {
+      { label = "Google " .. query,  symbol = "globe",  value = "google",
+        url = "https://www.google.com/search?q={query}" },
+      { label = "GitHub " .. query,  symbol = "chevron.left.forwardslash.chevron.right", value = "github",
+        url = "https://github.com/search?q={query}" },
+      { label = "Man page for " .. query, symbol = "doc.text", value = "man",
+        shell = "man {query}" },
+    }
+  end,
+}
+
+for _, name in ipairs({ "example", "smart", "text", "projects", "themes", "brew" }) do
+  local ok, plugin = pcall(require, "plugins." .. name)
+  if ok and type(plugin) == "table" then
+    for _, entry in ipairs(plugin.items or {}) do items[#items + 1] = entry end
+    for key, fn in pairs(plugin.providers or {}) do providers[key] = fn end
+  end
+end
+
+return {
+  hotkey = { key = "space", mods = { "option" } },
+
+  -- Modal navigation, off by default. When on, the panel opens in NORMAL mode:
+  --   j / k      move down / up          / or s   clear the query and start typing
+  --   i          resume typing           a        append at the end of the query
+  --   Escape     insert -> normal; in normal mode it clears, then goes back, then hides
+  --   Enter      activate, in either mode
+  -- Arrow keys keep working in both modes.
+  vim = false,
+  items = items,
+  providers = providers,
+}

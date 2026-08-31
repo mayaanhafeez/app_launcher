@@ -6,7 +6,50 @@ import Darwin
 final class GlobalHotKey {
     private var reference: EventHotKeyRef?
     private var handler: EventHandlerRef?
+    private var current: HotKeySpec?
     var action: (() -> Void)?
+
+    /// Key names accepted in `config.lua`. Letters and digits resolve on their own.
+    nonisolated private static let namedKeys: [String: Int] = [
+        "space": kVK_Space, "return": kVK_Return, "enter": kVK_Return, "tab": kVK_Tab,
+        "escape": kVK_Escape, "esc": kVK_Escape, "delete": kVK_Delete, "backspace": kVK_Delete,
+        "left": kVK_LeftArrow, "right": kVK_RightArrow, "up": kVK_UpArrow, "down": kVK_DownArrow,
+        "home": kVK_Home, "end": kVK_End, "pageup": kVK_PageUp, "pagedown": kVK_PageDown,
+        "grave": kVK_ANSI_Grave, "backtick": kVK_ANSI_Grave, "period": kVK_ANSI_Period,
+        "comma": kVK_ANSI_Comma, "slash": kVK_ANSI_Slash, "semicolon": kVK_ANSI_Semicolon,
+        "f1": kVK_F1, "f2": kVK_F2, "f3": kVK_F3, "f4": kVK_F4, "f5": kVK_F5, "f6": kVK_F6,
+        "f7": kVK_F7, "f8": kVK_F8, "f9": kVK_F9, "f10": kVK_F10, "f11": kVK_F11, "f12": kVK_F12,
+    ]
+
+    nonisolated private static let letterKeys: [Character: Int] = [
+        "a": kVK_ANSI_A, "b": kVK_ANSI_B, "c": kVK_ANSI_C, "d": kVK_ANSI_D, "e": kVK_ANSI_E,
+        "f": kVK_ANSI_F, "g": kVK_ANSI_G, "h": kVK_ANSI_H, "i": kVK_ANSI_I, "j": kVK_ANSI_J,
+        "k": kVK_ANSI_K, "l": kVK_ANSI_L, "m": kVK_ANSI_M, "n": kVK_ANSI_N, "o": kVK_ANSI_O,
+        "p": kVK_ANSI_P, "q": kVK_ANSI_Q, "r": kVK_ANSI_R, "s": kVK_ANSI_S, "t": kVK_ANSI_T,
+        "u": kVK_ANSI_U, "v": kVK_ANSI_V, "w": kVK_ANSI_W, "x": kVK_ANSI_X, "y": kVK_ANSI_Y,
+        "z": kVK_ANSI_Z, "0": kVK_ANSI_0, "1": kVK_ANSI_1, "2": kVK_ANSI_2, "3": kVK_ANSI_3,
+        "4": kVK_ANSI_4, "5": kVK_ANSI_5, "6": kVK_ANSI_6, "7": kVK_ANSI_7, "8": kVK_ANSI_8,
+        "9": kVK_ANSI_9,
+    ]
+
+    nonisolated static func keyCode(for name: String) -> Int? {
+        let clean = name.lowercased().trimmingCharacters(in: .whitespaces)
+        if let named = namedKeys[clean] { return named }
+        guard clean.count == 1, let character = clean.first else { return nil }
+        return letterKeys[character]
+    }
+
+    nonisolated static func modifierMask(for names: [String]) -> UInt32 {
+        names.reduce(into: UInt32(0)) { mask, name in
+            switch name.lowercased() {
+            case "option", "opt", "alt": mask |= UInt32(optionKey)
+            case "command", "cmd", "super": mask |= UInt32(cmdKey)
+            case "control", "ctrl": mask |= UInt32(controlKey)
+            case "shift": mask |= UInt32(shiftKey)
+            default: break
+            }
+        }
+    }
 
     init() {
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
@@ -17,32 +60,85 @@ final class GlobalHotKey {
             return noErr
         }
         InstallEventHandler(GetApplicationEventTarget(), callback, 1, &spec, Unmanaged.passUnretained(self).toOpaque(), &handler)
+    }
+
+    /// Re-registers on config reload. An unknown key name keeps the previous binding
+    /// rather than leaving the launcher with no way to open.
+    @discardableResult
+    func register(_ spec: HotKeySpec) -> Bool {
+        guard spec != current else { return true }
+        guard let code = Self.keyCode(for: spec.key) else { return false }
+        if let reference { UnregisterEventHotKey(reference) }
+        reference = nil
         let id = EventHotKeyID(signature: OSType(0x4f524254), id: 1)
-        RegisterEventHotKey(UInt32(kVK_Space), UInt32(optionKey), id, GetApplicationEventTarget(), 0, &reference)
+        let status = RegisterEventHotKey(UInt32(code), Self.modifierMask(for: spec.modifiers), id, GetApplicationEventTarget(), 0, &reference)
+        guard status == noErr else { return false }
+        current = spec
+        return true
     }
 }
 
 final class ConfigWatcher: @unchecked Sendable {
     private let directory: URL
+    private let filenames: [String]
     private let queue = DispatchQueue(label: "orbit.config-watch")
-    private var source: DispatchSourceFileSystemObject?
-    private var descriptor: Int32 = -1
+    private var directorySource: DispatchSourceFileSystemObject?
+    private var fileSources: [DispatchSourceFileSystemObject] = []
     var onChange: (() -> Void)?
 
-    init(directory: URL) { self.directory = directory }
+    private let watchesDirectory: Bool
+
+    init(directory: URL, filenames: [String] = ["config.lua", "theme.lua"], watchesDirectory: Bool = true) {
+        self.directory = directory
+        self.filenames = filenames
+        self.watchesDirectory = watchesDirectory
+    }
 
     func start() throws {
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        descriptor = open(directory.path, O_EVTONLY)
-        guard descriptor >= 0 else { throw RuntimeError.message("Unable to watch config directory") }
-        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: descriptor, eventMask: [.write, .rename, .delete, .extend], queue: queue)
-        source.setEventHandler { [weak self] in
-            guard let self else { return }
-            self.queue.asyncAfter(deadline: .now() + 0.08) { [weak self] in self?.onChange?() }
+        if watchesDirectory {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let descriptor = open(directory.path, O_EVTONLY)
+            guard descriptor >= 0 else { throw RuntimeError.message("Unable to watch config directory") }
+            let source = makeSource(descriptor: descriptor)
+            directorySource = source
+            source.resume()
         }
-        source.setCancelHandler { [descriptor] in close(descriptor) }
-        self.source = source
-        source.resume()
+        queue.async { [weak self] in self?.rearmFileWatches() }
+    }
+
+    private func makeSource(descriptor: Int32) -> DispatchSourceFileSystemObject {
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: descriptor,
+            eventMask: [.write, .rename, .delete, .extend, .attrib],
+            queue: queue
+        )
+        source.setEventHandler { [weak self] in self?.scheduleChange() }
+        source.setCancelHandler { close(descriptor) }
+        return source
+    }
+
+    /// A directory vnode event only fires when an entry is added, removed or renamed.
+    /// Rewriting a file in place — `cat > config.lua`, or any editor that saves
+    /// without a temp-file swap — never touches the directory, so each file is also
+    /// watched directly. The file watches are re-armed after every event because an
+    /// editor that saves via rename leaves the old descriptor pointing at a dead inode.
+    private func rearmFileWatches() {
+        fileSources.forEach { $0.cancel() }
+        fileSources = filenames.compactMap { name in
+            let descriptor = open(directory.appendingPathComponent(name).path, O_EVTONLY)
+            guard descriptor >= 0 else { return nil }
+            let source = makeSource(descriptor: descriptor)
+            source.resume()
+            return source
+        }
+    }
+
+    private func scheduleChange() {
+        queue.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+            guard let self else { return }
+            rearmFileWatches()
+            onChange?()
+        }
     }
 }
 

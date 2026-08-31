@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let panel = PanelController()
     private var hotKey: GlobalHotKey?
     private var watcher: ConfigWatcher?
+    private var themePointerWatcher: ConfigWatcher?
     private var ipc: IPCServer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -17,13 +18,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         wireUI()
         reloadAll()
         appIndex.start()
-        hotKey = GlobalHotKey()
-        hotKey?.action = { [weak self] in self?.toggle(route: "root") }
+        let hotKey = GlobalHotKey()
+        hotKey.action = { [weak self] in self?.toggle(route: "root") }
+        hotKey.register(HotKeySpec())
+        self.hotKey = hotKey
         startWatcher()
         startIPC()
     }
 
     private func wireUI() {
+        runtime.onSettings = { [weak self] settings in
+            guard let self else { return }
+            panel.vimEnabled = settings.vimMode
+            if hotKey?.register(settings.hotKey) == false {
+                panel.showNotice("Unknown hotkey: \(settings.hotKey.key)")
+            }
+        }
         menu.onRows = { [weak panel] title, rows in panel?.update(title: title, rows: rows) }
         menu.onNotice = { [weak panel] message in panel?.showNotice(message) }
         menu.onDismiss = { [weak panel] in panel?.hide() }
@@ -41,11 +51,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let watcher = ConfigWatcher(directory: configDirectory)
         watcher.onChange = { [weak self] in Task { @MainActor in self?.reloadChangedFiles() } }
         do { try watcher.start(); self.watcher = watcher } catch { panel.showNotice(error.localizedDescription) }
+
+        // `palette = "auto"` follows ~/.config/theme, so a `set-theme` switch has to
+        // retint the panel the same way editing theme.lua does.
+        let pointer = ConfigWatcher(
+            directory: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config"),
+            filenames: ["theme"],
+            watchesDirectory: false
+        )
+        pointer.onChange = { [weak self] in Task { @MainActor in self?.reloadTheme() } }
+        do { try pointer.start(); themePointerWatcher = pointer } catch { /* no pointer file: palette stays as written */ }
+    }
+
+    private func reloadTheme() {
+        panel.apply(theme: themeRuntime.load(file: configDirectory.appendingPathComponent("theme.lua")))
     }
 
     private func reloadChangedFiles() {
         runtime.load(file: configDirectory.appendingPathComponent("config.lua"))
-        panel.apply(theme: themeRuntime.load(file: configDirectory.appendingPathComponent("theme.lua")))
+        reloadTheme()
     }
 
     private func startIPC() {
@@ -62,6 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case "show": show(route: request.argument ?? "root"); return IPCResponse(ok: true, message: "ok")
         case "hide": panel.hide(); return IPCResponse(ok: true, message: "ok")
         case "reload": reloadAll(); return IPCResponse(ok: true, message: "ok")
+        case "theme": return IPCResponse(ok: true, message: themeRuntime.paletteName.isEmpty ? "(no palette)" : themeRuntime.paletteName)
         case "invoke": return menu.invoke(id: request.argument ?? "") ? IPCResponse(ok: true, message: "ok") : IPCResponse(ok: false, message: "unknown node")
         default: return IPCResponse(ok: false, message: "unknown command")
         }
