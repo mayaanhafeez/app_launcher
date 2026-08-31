@@ -22,6 +22,7 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
     private let table = NSTableView()
     private let scroll = NSScrollView()
     private let notice = NSTextField(wrappingLabelWithString: "")
+    private let emptyLabel = NSTextField(labelWithString: "No matches")
     private var rows: [DisplayRow] = []
     private var theme = Theme()
     private var title = "Go"
@@ -65,6 +66,7 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
         self.rows = rows
         updatePrompt()
         table.reloadData()
+        emptyLabel.isHidden = !rows.isEmpty
         if rows.isEmpty { table.deselectAll(nil) }
         else { table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false); table.scrollRowToVisible(0) }
     }
@@ -88,7 +90,7 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
         input.textColor = theme.fg
         input.font = font(size: theme.fontSize + 3, weight: .medium)
         notice.textColor = theme.fg
-        table.rowHeight = 52
+        table.rowHeight = 48
         table.reloadData()
     }
 
@@ -98,6 +100,10 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
         let cell = RowView()
         cell.configure(item: rows[row], theme: theme)
         return cell
+    }
+
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        rows[row].detail.isEmpty || input.stringValue.isEmpty ? 48 : 58
     }
 
     func controlTextDidChange(_ obj: Notification) {
@@ -153,6 +159,7 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
 
     private func updatePrompt() {
         prompt.stringValue = input.stringValue.isEmpty ? "\(title)..." : ""
+        table.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<rows.count))
     }
 
     private func font(size: CGFloat, weight: NSFont.Weight) -> NSFont {
@@ -166,7 +173,7 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
         blur.wantsLayer = true
         card.wantsLayer = true
         [card].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; blur.addSubview($0) }
-        [prompt, input, scroll, notice].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; card.addSubview($0) }
+        [prompt, input, scroll, emptyLabel, notice].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; card.addSubview($0) }
 
         input.isBordered = false
         input.isBezeled = false
@@ -191,6 +198,9 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
         scroll.documentView = table
         scroll.hasVerticalScroller = false
         scroll.drawsBackground = false
+        emptyLabel.textColor = theme.fgMuted
+        emptyLabel.alignment = .center
+        emptyLabel.isHidden = true
 
         notice.wantsLayer = true
         notice.layer?.backgroundColor = NSColor.systemRed.withAlphaComponent(0.92).cgColor
@@ -203,6 +213,7 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
             input.topAnchor.constraint(equalTo: card.topAnchor, constant: 18), input.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 22), input.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -22), input.heightAnchor.constraint(equalToConstant: 34),
             prompt.leadingAnchor.constraint(equalTo: input.leadingAnchor), prompt.trailingAnchor.constraint(equalTo: input.trailingAnchor), prompt.centerYAnchor.constraint(equalTo: input.centerYAnchor),
             scroll.topAnchor.constraint(equalTo: input.bottomAnchor, constant: 13), scroll.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 12), scroll.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12), scroll.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -12),
+            emptyLabel.centerXAnchor.constraint(equalTo: card.centerXAnchor), emptyLabel.centerYAnchor.constraint(equalTo: card.centerYAnchor),
             notice.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 14), notice.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -14), notice.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -14), notice.heightAnchor.constraint(greaterThanOrEqualToConstant: 38),
         ])
     }
@@ -211,6 +222,7 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
 }
 
 final class RowView: NSTableCellView {
+    private let divider = NSBox()
     private let iconView = NSImageView()
     private let symbol = NSImageView()
     private let label = NSTextField(labelWithString: "")
@@ -220,10 +232,12 @@ final class RowView: NSTableCellView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        [iconView, symbol, label, detail, chevron].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; addSubview($0) }
+        [divider, iconView, symbol, label, detail, chevron].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; addSubview($0) }
+        divider.boxType = .separator
         iconView.imageScaling = .scaleProportionallyUpOrDown
         detail.lineBreakMode = .byTruncatingTail
         NSLayoutConstraint.activate([
+            divider.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4), divider.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4), divider.topAnchor.constraint(equalTo: topAnchor),
             iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12), iconView.centerYAnchor.constraint(equalTo: centerYAnchor), iconView.widthAnchor.constraint(equalToConstant: 28), iconView.heightAnchor.constraint(equalToConstant: 28),
             symbol.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 15), symbol.centerYAnchor.constraint(equalTo: centerYAnchor), symbol.widthAnchor.constraint(equalToConstant: 21), symbol.heightAnchor.constraint(equalToConstant: 21),
             label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 51), label.topAnchor.constraint(equalTo: topAnchor, constant: 7), label.trailingAnchor.constraint(lessThanOrEqualTo: chevron.leadingAnchor, constant: -8),
@@ -249,6 +263,7 @@ final class RowView: NSTableCellView {
         detail.isHidden = item.detail.isEmpty
         chevron.contentTintColor = theme.fgMuted
         chevron.isHidden = item.kind != .menu
+        divider.isHidden = item.section != "drilldown-start"
         layer?.cornerRadius = max(8, theme.radius - 7)
         layer?.cornerCurve = .continuous
     }

@@ -14,8 +14,11 @@ final class AppIndex: NSObject, NSMetadataQueryDelegate {
             let roots = [URL(fileURLWithPath: "/Applications"), URL(fileURLWithPath: "/System/Applications"), home.appendingPathComponent("Applications")]
             var paths = Set<String>()
             for root in roots {
-                guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { continue }
-                for case let url as URL in enumerator where url.pathExtension == "app" { paths.insert(url.path) }
+                guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isDirectoryKey, .isPackageKey], options: [.skipsHiddenFiles]) else { continue }
+                for case let url as URL in enumerator where url.pathExtension.lowercased() == "app" {
+                    paths.insert(url.path)
+                    enumerator.skipDescendants()
+                }
             }
             let built = paths.compactMap(Self.makeEntry).sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
             Task { @MainActor [weak self] in self?.merge(built) }
@@ -56,7 +59,7 @@ final class AppIndex: NSObject, NSMetadataQueryDelegate {
     private func startMetadataQuery() {
         let query = NSMetadataQuery()
         query.searchScopes = [NSMetadataQueryLocalComputerScope]
-        query.predicate = NSPredicate(format: "%K == %@", NSMetadataItemContentTypeKey, "com.apple.application-bundle")
+        query.predicate = NSPredicate(format: "%K == %@ OR ANY %K == %@", NSMetadataItemContentTypeKey, "com.apple.application-bundle", NSMetadataItemContentTypeTreeKey, "com.apple.application-bundle")
         query.delegate = self
         metadataQuery = query
         query.start()
@@ -65,7 +68,7 @@ final class AppIndex: NSObject, NSMetadataQueryDelegate {
     func metadataQueryDidFinishGathering(_ notification: Notification) {
         guard let query = notification.object as? NSMetadataQuery else { return }
         query.disableUpdates()
-        let paths = query.results.compactMap { ($0 as? NSMetadataItem)?.value(forAttribute: NSMetadataItemPathKey) as? String }
+        let paths = query.results.compactMap { ($0 as? NSMetadataItem)?.value(forAttribute: NSMetadataItemPathKey) as? String }.filter(Self.isTopLevelApplication)
         query.enableUpdates()
         worker.async { [weak self] in
             let built = paths.compactMap(Self.makeEntry)
@@ -74,4 +77,13 @@ final class AppIndex: NSObject, NSMetadataQueryDelegate {
     }
 
     func metadataQueryDidUpdate(_ notification: Notification) { metadataQueryDidFinishGathering(notification) }
+
+    nonisolated private static func isTopLevelApplication(_ path: String) -> Bool {
+        guard path.hasSuffix(".app") else { return false }
+        let components = URL(fileURLWithPath: path).pathComponents
+        guard let appIndex = components.lastIndex(where: { $0.hasSuffix(".app") }) else { return false }
+        return !components[..<appIndex].contains(where: { $0.hasSuffix(".app") })
+            && !path.contains("/Library/Developer/")
+            && !path.contains("/.Trash/")
+    }
 }

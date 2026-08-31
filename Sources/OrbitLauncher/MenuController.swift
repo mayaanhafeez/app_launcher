@@ -4,7 +4,7 @@ import AppKit
 final class MenuController {
     let appIndex: AppIndex
     let runtime: LuaRuntime
-    private(set) var nodes: [MenuNode] = []
+    var nodes: [MenuNode] = []
     private var activeMenu = "root"
     private var navigation: [String] = []
     private var providerGeneration = 0
@@ -75,8 +75,10 @@ final class MenuController {
         let title = nodes.first(where: { $0.id == activeMenu })?.label ?? "Go"
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         var rows: [DisplayRow] = []
-        if activeMenu == "apps" || (activeMenu == "root" && !trimmed.isEmpty) {
-            rows.append(contentsOf: appIndex.results(for: trimmed, limit: 14))
+        if activeMenu == "apps" {
+            rows.append(contentsOf: appIndex.results(for: trimmed, limit: trimmed.isEmpty ? appIndex.entries.count : 40))
+        } else if activeMenu == "root" && !trimmed.isEmpty {
+            rows.append(contentsOf: appIndex.results(for: trimmed, limit: 40))
         }
         let candidates = nodes.filter { node in
             if trimmed.isEmpty { return node.parent == activeMenu }
@@ -87,8 +89,21 @@ final class MenuController {
             guard let score else { return nil }
             return DisplayRow(id: node.id, kind: node.kind, label: node.label, detail: trimmed.isEmpty ? node.detail : path(for: node), symbol: node.symbol, image: nil, score: score, section: node.parent == activeMenu ? "current" : "drilldown")
         })
-        rows.sort { $0.score == $1.score ? $0.label < $1.label : $0.score < $1.score }
-        let baseRows = Array(rows.prefix(14))
+        if trimmed.isEmpty {
+            rows.sort { activeMenu == "apps" ? $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending : $0.score < $1.score }
+        } else {
+            rows.sort {
+                let lhsSection = $0.section == "current" ? 0 : 1
+                let rhsSection = $1.section == "current" ? 0 : 1
+                if lhsSection != rhsSection { return lhsSection < rhsSection }
+                return $0.score == $1.score ? $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending : $0.score < $1.score
+            }
+            if let split = rows.firstIndex(where: { $0.section != "current" }), split > 0 {
+                let row = rows[split]
+                rows[split] = DisplayRow(id: row.id, kind: row.kind, label: row.label, detail: row.detail, symbol: row.symbol, image: row.image, score: row.score, section: "drilldown-start")
+            }
+        }
+        let baseRows = rows
         onRows?(title, baseRows)
         let providerNames = Set(candidates.compactMap(\.provider))
         providerGeneration += 1
@@ -98,7 +113,7 @@ final class MenuController {
                 DispatchQueue.main.async {
                     guard let self, generation == self.providerGeneration else { return }
                     switch result {
-                    case .success(let providerRows): self.onRows?(title, Array((baseRows + providerRows).prefix(14)))
+                    case .success(let providerRows): self.onRows?(title, baseRows + providerRows)
                     case .failure(let error): self.onNotice?(error.localizedDescription)
                     }
                 }
