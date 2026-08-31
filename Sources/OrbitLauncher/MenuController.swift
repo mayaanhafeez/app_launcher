@@ -46,6 +46,9 @@ final class MenuController {
         } else if let reference = node.actionReference {
             runtime.invoke(reference: reference)
             onDismiss?()
+        } else if let scriptAction = node.scriptAction {
+            runtime.invoke(scriptAction: scriptAction)
+            onDismiss?()
         }
     }
 
@@ -57,8 +60,10 @@ final class MenuController {
     }
 
     func invoke(id: String) -> Bool {
-        guard let node = nodes.first(where: { $0.id.caseInsensitiveCompare(id) == .orderedSame }), let reference = node.actionReference else { return false }
-        runtime.invoke(reference: reference)
+        guard let node = nodes.first(where: { $0.id.caseInsensitiveCompare(id) == .orderedSame }) else { return false }
+        if let reference = node.actionReference { runtime.invoke(reference: reference) }
+        else if let scriptAction = node.scriptAction { runtime.invoke(scriptAction: scriptAction) }
+        else { return false }
         return true
     }
 

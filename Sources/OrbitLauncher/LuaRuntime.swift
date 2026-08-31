@@ -46,13 +46,37 @@ private func luaString(_ state: OpaquePointer, _ index: Int32) -> String? {
     return String(cString: pointer)
 }
 
-private let curatedRun: lua_CFunction = { state in
-    guard let state, let command = luaString(state, 1) else { return 0 }
-    NSLog("OrbitLauncher run: %@", command)
+private func terminalScript(_ command: String) -> String {
+    let encoded = Data(command.utf8).base64EncodedString()
+    let shell = "printf %s \(encoded) | base64 -D | /bin/zsh"
+    return "tell application \"Terminal\"\nactivate\ndo script \"\(shell)\"\nend tell"
+}
+
+private func launchTerminal(_ command: String) {
+    NSLog("OrbitLauncher terminal: %@", command)
     let task = Process()
-    task.executableURL = URL(fileURLWithPath: "/bin/zsh")
-    task.arguments = ["-lc", command]
-    do { try task.run() } catch { NSLog("OrbitLauncher run failed: %@", error.localizedDescription) }
+    task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+    task.arguments = ["-e", terminalScript(command)]
+    do { try task.run() } catch { NSLog("OrbitLauncher terminal failed: %@", error.localizedDescription) }
+}
+
+private func launchAppleScript(_ source: String) {
+    NSLog("OrbitLauncher osascript invoked")
+    let task = Process()
+    task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+    task.arguments = ["-e", source]
+    do { try task.run() } catch { NSLog("OrbitLauncher osascript failed: %@", error.localizedDescription) }
+}
+
+private let terminalRun: lua_CFunction = { state in
+    guard let state, let command = luaString(state, 1) else { return 0 }
+    launchTerminal(command)
+    return 0
+}
+
+private let appleScriptRun: lua_CFunction = { state in
+    guard let state, let source = luaString(state, 1) else { return 0 }
+    launchAppleScript(source)
     return 0
 }
 
@@ -76,11 +100,18 @@ final class LuaRuntime: @unchecked Sendable {
         }
     }
 
+    func invoke(scriptAction: ScriptAction) {
+        switch scriptAction {
+        case .shell(let command): launchTerminal(command)
+        case .appleScript(let source): launchAppleScript(source)
+        }
+    }
+
     func provider(name: String, query: String, timeout: TimeInterval = 0.15, completion: @escaping @Sendable (Result<[DisplayRow], Error>) -> Void) {
         queue.async { [weak self] in
             guard let self, let reference = providers[name], let sourceState = state else { completion(.success([])); return }
             guard let dump = dumpFunction(sourceState, reference: reference) else { completion(.failure(RuntimeError.message("Provider is not serializable"))); return }
-            guard let providerState = Self.makeState(allowRun: true) else { completion(.failure(RuntimeError.message("Unable to create provider state"))); return }
+            guard let providerState = Self.makeState(allowActions: false) else { completion(.failure(RuntimeError.message("Unable to create provider state"))); return }
             defer { lua_close(providerState) }
             let loadStatus = dump.withUnsafeBytes { bytes in
                 luaL_loadbufferx(providerState, bytes.bindMemory(to: CChar.self).baseAddress, bytes.count, "provider", "b")
@@ -101,7 +132,7 @@ final class LuaRuntime: @unchecked Sendable {
         state = nil
         nodes = []
         providers = [:]
-        guard let next = Self.makeState(allowRun: true) else { publish(.failure(RuntimeError.message("Unable to initialize Lua"))); return }
+        guard let next = Self.makeState(allowActions: true) else { publish(.failure(RuntimeError.message("Unable to initialize Lua"))); return }
         state = next
         guard FileManager.default.fileExists(atPath: file.path) else {
             nodes = Self.defaultNodes
@@ -118,14 +149,18 @@ final class LuaRuntime: @unchecked Sendable {
         publish(.success(nodes))
     }
 
-    private static func makeState(allowRun: Bool) -> OpaquePointer? {
+    private static func makeState(allowActions: Bool) -> OpaquePointer? {
         guard let state = luaL_newstate() else { return nil }
         luaL_openlibs(state)
         lua_pushnil(state); lua_setglobal(state, "io")
         lua_getglobal(state, "os")
         if lua_type(state, -1) == LUA_TTABLE { lua_pushnil(state); lua_setfield(state, -2, "execute") }
         lua_settop(state, 0)
-        if allowRun { lua_pushcclosure(state, curatedRun, 0); lua_setglobal(state, "run") }
+        if allowActions {
+            lua_pushcclosure(state, terminalRun, 0); lua_setglobal(state, "terminal")
+            lua_pushcclosure(state, terminalRun, 0); lua_setglobal(state, "run")
+            lua_pushcclosure(state, appleScriptRun, 0); lua_setglobal(state, "osascript")
+        }
         return state
     }
 
@@ -163,6 +198,8 @@ final class LuaRuntime: @unchecked Sendable {
         let detail = field("detail") ?? ""
         let symbol = field("symbol") ?? ""
         let provider = field("provider")
+        let shell = field("shell")
+        let appleScript = field("applescript")
         lua_getfield(state, -1, "action")
         var actionReference: Int32?
         if lua_type(state, -1) == LUA_TFUNCTION {
@@ -170,8 +207,9 @@ final class LuaRuntime: @unchecked Sendable {
             actionReference = luaL_ref(state, CLUA_REGISTRYINDEX)
         }
         lua_settop(state, -2)
-        let kind: RowKind = actionReference != nil ? .action : .menu
-        return MenuNode(id: id, parent: id == "root" ? "" : parent, kind: kind, label: label, detail: detail, symbol: symbol, provider: provider, actionReference: actionReference, order: order)
+        let scriptAction = shell.map(ScriptAction.shell) ?? appleScript.map(ScriptAction.appleScript)
+        let kind: RowKind = actionReference != nil || scriptAction != nil ? .action : .menu
+        return MenuNode(id: id, parent: id == "root" ? "" : parent, kind: kind, label: label, detail: detail, symbol: symbol, provider: provider, actionReference: actionReference, scriptAction: scriptAction, order: order)
     }
 
     private func dumpFunction(_ state: OpaquePointer, reference: Int32) -> Data? {
@@ -212,10 +250,10 @@ final class LuaRuntime: @unchecked Sendable {
     private func publish(_ result: Result<[MenuNode], Error>) { DispatchQueue.main.async { [weak self] in self?.onReload?(result) } }
 
     private static let defaultNodes = [
-        MenuNode(id: "root", parent: "", kind: .menu, label: "Go", detail: "", symbol: "", provider: nil, actionReference: nil, order: 0),
-        MenuNode(id: "apps", parent: "root", kind: .menu, label: "Applications", detail: "Installed applications", symbol: "square.grid.2x2", provider: nil, actionReference: nil, order: 1),
-        MenuNode(id: "system", parent: "root", kind: .menu, label: "System", detail: "Settings and session", symbol: "gearshape", provider: nil, actionReference: nil, order: 2),
-        MenuNode(id: "tools", parent: "root", kind: .menu, label: "Tools", detail: "Everyday utilities", symbol: "hammer", provider: nil, actionReference: nil, order: 3),
+        MenuNode(id: "root", parent: "", kind: .menu, label: "Go", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: nil, order: 0),
+        MenuNode(id: "apps", parent: "root", kind: .menu, label: "Applications", detail: "Installed applications", symbol: "square.grid.2x2", provider: nil, actionReference: nil, scriptAction: nil, order: 1),
+        MenuNode(id: "system", parent: "root", kind: .menu, label: "System", detail: "Settings and session", symbol: "gearshape", provider: nil, actionReference: nil, scriptAction: nil, order: 2),
+        MenuNode(id: "tools", parent: "root", kind: .menu, label: "Tools", detail: "Everyday utilities", symbol: "hammer", provider: nil, actionReference: nil, scriptAction: nil, order: 3),
     ]
 }
 

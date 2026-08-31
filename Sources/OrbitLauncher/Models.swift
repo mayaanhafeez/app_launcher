@@ -17,7 +17,13 @@ struct MenuNode: Sendable {
     let symbol: String
     let provider: String?
     let actionReference: Int32?
+    let scriptAction: ScriptAction?
     let order: Int
+}
+
+enum ScriptAction: Sendable {
+    case shell(String)
+    case appleScript(String)
 }
 
 struct DisplayRow: @unchecked Sendable {
