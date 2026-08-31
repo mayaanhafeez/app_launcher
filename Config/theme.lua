@@ -46,7 +46,10 @@ return {
 
   -- Spacing. Every value below is multiplied by spacing_scale.
   spacing_scale = 1.0,
-  panel_padding = 12,
+  panel_padding = 12,     -- every edge, unless overridden per edge below
+  -- padding_top = 12,
+  -- padding_bottom = 12,
+  -- padding_sides = 12,
   row_gap = 2,
   row_padding_x = 10,
   icon_slot = 34,

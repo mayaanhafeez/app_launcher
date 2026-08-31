@@ -101,3 +101,26 @@ import Testing
     #expect(custom.position(for: "s", modifiers: [.command]) == nil)
     #expect(ShortcutSpec(enabled: false).position(for: "1", modifiers: [.command]) == nil)
 }
+
+@Test func edgePaddingOverridesFallBackToPanelPadding() {
+    var theme = Theme()
+    theme.panelPadding = 12
+    #expect(theme.topPadding == 12)
+    #expect(theme.bottomPadding == 12)
+    #expect(theme.sidePadding == 12)
+
+    // An unset edge keeps following panel_padding.
+    theme.paddingTop = 30
+    #expect(theme.topPadding == 30)
+    #expect(theme.bottomPadding == 12)
+    #expect(theme.sidePadding == 12)
+
+    // Overrides are scaled like every other spacing token.
+    theme.spacingScale = 2
+    #expect(theme.topPadding == 60)
+    #expect(theme.sidePadding == 24)
+
+    // Zero means zero, not "unset".
+    theme.paddingSides = 0
+    #expect(theme.sidePadding == 0)
+}

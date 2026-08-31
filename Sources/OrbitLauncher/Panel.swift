@@ -226,19 +226,19 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
         notice.font = theme.font(size: theme.smallSize, weight: theme.detailWeight)
         notice.layer?.cornerRadius = theme.rowRadius
 
-        let padding = theme.space(theme.panelPadding)
-        inputTop.constant = padding
-        inputLeading.constant = padding + theme.space(theme.rowPaddingX)
-        inputTrailing.constant = -(padding + theme.space(theme.rowPaddingX))
+        let sides = theme.sidePadding
+        inputTop.constant = theme.topPadding
+        inputLeading.constant = sides + theme.space(theme.rowPaddingX)
+        inputTrailing.constant = -(sides + theme.space(theme.rowPaddingX))
         inputHeight.constant = theme.headerHeight
         scrollTop.constant = theme.space(theme.headerGap)
-        scrollLeading.constant = padding
-        scrollTrailing.constant = -padding
-        scrollBottom.constant = -padding
-        noticeLeading.constant = padding
-        noticeTrailing.constant = -padding
-        noticeBottom.constant = -padding
-        modeTrailing.constant = -(padding + theme.space(theme.rowPaddingX))
+        scrollLeading.constant = sides
+        scrollTrailing.constant = -sides
+        scrollBottom.constant = -theme.bottomPadding
+        noticeLeading.constant = sides
+        noticeTrailing.constant = -sides
+        noticeBottom.constant = -theme.bottomPadding
+        modeTrailing.constant = -(sides + theme.space(theme.rowPaddingX))
         refreshModeIndicator()
 
         table.intercellSpacing = NSSize(width: 0, height: theme.space(theme.rowGap))
@@ -257,11 +257,11 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
         let screen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? NSScreen.main
         let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
 
-        let padding = theme.space(theme.panelPadding)
-        let chrome = padding * 2 + theme.headerHeight + theme.space(theme.headerGap)
-        let cap = max(theme.headerHeight + padding * 2, visible.height * theme.maxHeight)
+        let edges = theme.topPadding + theme.bottomPadding
+        let chrome = edges + theme.headerHeight + theme.space(theme.headerGap)
+        let cap = max(theme.headerHeight + edges, visible.height * theme.maxHeight)
         let height = min(chrome + contentHeight(), cap).rounded()
-        let width = min(theme.width, visible.width - padding * 2).rounded()
+        let width = min(theme.width, visible.width - theme.sidePadding * 2).rounded()
 
         let origin = NSPoint(
             x: (visible.midX - width / 2).rounded(),
@@ -417,12 +417,12 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
     private func refreshModeIndicator() {
         modeLabel.isHidden = !vimEnabled
         guard vimEnabled else {
-            inputTrailing.constant = -(theme.space(theme.panelPadding) + theme.space(theme.rowPaddingX))
+            inputTrailing.constant = -(theme.sidePadding + theme.space(theme.rowPaddingX))
             return
         }
         modeLabel.stringValue = mode == .normal ? "NORMAL" : "INSERT"
         modeLabel.textColor = mode == .normal ? theme.fgMuted : theme.accent
-        inputTrailing.constant = -(theme.space(theme.panelPadding) + theme.space(theme.rowPaddingX)
+        inputTrailing.constant = -(theme.sidePadding + theme.space(theme.rowPaddingX)
                                    + modeWidth.constant + theme.space(theme.iconGap))
     }
 
