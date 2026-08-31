@@ -178,12 +178,26 @@ struct ShortcutSpec: Sendable, Equatable {
     }
 }
 
+/// Extra places to look for `.app` bundles, from `apps = { ... }` in config.lua.
+/// The built-in roots (`/Applications`, `/System/Applications`, `~/Applications`)
+/// are always scanned; these are added to them.
+struct AppScanSpec: Sendable, Equatable {
+    /// Roots to scan, `~` allowed.
+    var paths: [String] = []
+    /// How many path components below a root to walk. A root like `~/dev` can be
+    /// enormous, and an app buried deeper than this is not something a launcher
+    /// should be turning up. Three covers every built-in root, down to
+    /// `~/Applications/CrossOver/Steam/Steam.app`.
+    var depth = 3
+}
+
 struct Settings: Sendable {
     var hotKey = HotKeySpec()
     /// Modal navigation, off unless `vim = true` in config.lua.
     var vimMode = false
     var back = BackRowSpec()
     var shortcuts = ShortcutSpec()
+    var apps = AppScanSpec()
 }
 
 // MARK: - Vim mode

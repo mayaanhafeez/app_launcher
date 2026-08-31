@@ -49,8 +49,14 @@ private func luaString(_ state: OpaquePointer, _ index: Int32) -> String? {
 
 private func terminalScript(_ command: String) -> String {
     let encoded = Data(command.utf8).base64EncodedString()
-    let shell = "printf %s \(encoded) | base64 -D | /bin/zsh"
-    return "tell application \"Terminal\"\nactivate\ndo script \"\(shell)\"\nend tell"
+    // The decoded script is `eval`-ed in the window's own shell rather than piped
+    // into a new one. Piping puts the script on stdin, which is the very thing
+    // `read` reads from: a one-line `read -r '?Formula: ' name; brew install $name`
+    // saw EOF and installed nothing, and a multi-line script had `read` swallow its
+    // own next line. `eval` leaves stdin on the tty, and because that shell is
+    // interactive it is also what makes zsh print `read`'s `?prompt` at all.
+    let shell = "eval \"$(printf %s \(encoded) | base64 -D)\""
+    return "tell application \"Terminal\"\nactivate\ndo script \"\(ScriptAction.appleScriptQuoted(shell))\"\nend tell"
 }
 
 private func launchTerminal(_ command: String) {
@@ -274,6 +280,15 @@ final class LuaRuntime: @unchecked Sendable {
             lua_settop(state, -2)
             if let mods = stringList(state, field: "mods") { settings.shortcuts.modifiers = mods }
             if let keys = stringList(state, field: "keys") { settings.shortcuts.keys = keys }
+        }
+        lua_settop(state, -2)
+
+        lua_getfield(state, -1, "apps")
+        if lua_type(state, -1) == LUA_TTABLE {
+            if let paths = stringList(state, field: "paths") { settings.apps.paths = paths }
+            lua_getfield(state, -1, "depth")
+            if lua_type(state, -1) == LUA_TNUMBER { settings.apps.depth = max(1, Int(lua_tonumberx(state, -1, nil))) }
+            lua_settop(state, -2)
         }
         lua_settop(state, -2)
 

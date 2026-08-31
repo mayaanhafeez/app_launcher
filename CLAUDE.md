@@ -99,8 +99,12 @@ Sandboxing is deliberate and layered — preserve it when touching `makeState`:
 - `ThemeRuntime` is a separate short-lived state with `io`/`os`/`package`/`debug` removed. It returns a value-typed
   `Theme` and can only restyle the panel — a theme reload cannot touch the menu.
 
-`shell` commands are Base64-encoded into `printf … | base64 -D | /bin/zsh` inside a `do script` AppleScript. That
+`shell` commands are Base64-encoded into `eval "$(printf … | base64 -D)"` inside a `do script` AppleScript. The
 encoding is what keeps quotes, newlines, pipes and redirects intact; don't "simplify" it into string interpolation.
+The `eval` matters just as much: piping the decoded script into a shell puts it on **stdin**, which is exactly where
+`read` reads from, so `read -r '?Formula: ' name; … && brew install $name` saw EOF and installed nothing (and a
+multi-line script had `read` swallow its own next line). `eval` runs it in the Terminal window's own shell, which
+leaves stdin on the tty — and because that shell is interactive, it is also what makes zsh print `read`'s `?prompt`.
 
 `{query}` substitution lives on `ScriptAction.resolved(query:)` and escapes per destination —
 single-quoted for shell, percent-encoded for URLs, backslash-escaped for AppleScript. Lua
@@ -120,6 +124,25 @@ vnode event only fires when an entry is added, removed or renamed — rewriting 
 directory, so a directory-only watch silently misses those saves. File watches are re-armed after
 every event because an editor that saves via rename leaves the old descriptor on a dead inode.
 A second watcher covers `~/.config/theme` so `palette = "auto"` retints when `set-theme` switches.
+
+### App index
+
+`AppIndex` scans `/Applications`, `/System/Applications` and `~/Applications`, plus whatever `apps.paths` adds, and a
+scan **replaces** the index rather than merging into it — dropping a path from the config, or deleting an app, has to
+remove those rows on the next reload. `apps.depth` (3 by default) caps how far below a root the walk goes, because a
+user root like `~/dev` can be enormous; 3 covers every built-in root, down to `~/Applications/CrossOver/Steam/Steam.app`.
+Packages are returned but never descended into, so an app's bundled helper apps stay out of the list.
+
+Icons are the index's entire memory cost — `NSWorkspace.icon(forFile:)` returns a multi-representation image sized for
+the Finder and the index holds one per app for the process lifetime. `thumbnail(for:)` flattens each to a single 2x
+bitmap at `thumbnailSize` (36pt, covering `Theme.iconSlot`), so an icon costs a fixed ~21KB
+(72x72 RGBA) instead of a Finder-sized image with every representation it ships. A 129-app index sits at ~82MB resident
+at rest; opening the full apps list still adds ~30MB of AppKit row and layer memory, which this does not address.
+
+An `NSMetadataQuery` for app bundles used to live here and was removed: nothing observed
+`NSMetadataQueryDidFinishGathering`, and `NSMetadataQueryDelegate` has no such callback (only the two `replacement…`
+methods), so its results were never consumed. Wiring Spotlight back up means adding those notification observers — and
+keeping the directory scan regardless, since Spotlight indexes nothing under `/System`.
 
 ### Theme
 

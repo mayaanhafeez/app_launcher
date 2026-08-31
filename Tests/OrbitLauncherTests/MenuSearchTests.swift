@@ -1,3 +1,4 @@
+import AppKit
 import Testing
 @testable import OrbitLauncher
 
@@ -123,4 +124,30 @@ import Testing
     controller.open(route: "setup")
     controller.activate(DisplayRow(id: "orbit.back", kind: .back, label: "Back", detail: "", symbol: "", image: nil, score: -1, section: "back"))
     #expect(labels == ["Setup"])          // back at root, so no back row
+}
+
+@Test func appScanHonoursItsDepthCapAndSkipsAppsInsideApps() throws {
+    let fileManager = FileManager.default
+    let root = fileManager.temporaryDirectory.appendingPathComponent("orbit-scan-\(UUID().uuidString)")
+    defer { try? fileManager.removeItem(at: root) }
+
+    // A bundle at each level, plus one nested inside another bundle.
+    let bundles = ["Top.app", "one/Nested.app", "one/two/Deep.app", "one/two/three/TooDeep.app", "Top.app/Contents/Helper.app"]
+    for bundle in bundles {
+        try fileManager.createDirectory(at: root.appendingPathComponent(bundle), withIntermediateDirectories: true)
+    }
+
+    let found = Set(AppIndex.appPaths(in: [root], depth: 3).map { URL(fileURLWithPath: $0).lastPathComponent })
+    #expect(found == ["Top.app", "Nested.app", "Deep.app"])
+
+    let shallow = Set(AppIndex.appPaths(in: [root], depth: 1).map { URL(fileURLWithPath: $0).lastPathComponent })
+    #expect(shallow == ["Top.app"])
+}
+
+@Test func iconsAreFlattenedToOneBitmapAtRowSize() {
+    let icon = AppIndex.thumbnail(for: "/bin/ls")
+    #expect(icon.size == NSSize(width: AppIndex.thumbnailSize, height: AppIndex.thumbnailSize))
+    // One representation at 2x, rather than the multi-size image NSWorkspace hands back.
+    #expect(icon.representations.count == 1)
+    #expect(icon.representations.first?.pixelsWide == Int(AppIndex.thumbnailSize) * 2)
 }

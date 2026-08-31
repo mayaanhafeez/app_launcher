@@ -147,6 +147,14 @@ return {
   -- removes it; `position` is "top" or "bottom".
   back = { enabled = true, label = "Back", symbol = "chevron.left", position = "top" },
 
+  -- Extra roots to scan for .app bundles, on top of /Applications,
+  -- /System/Applications and ~/Applications. `depth` is how many components below
+  -- a root to walk — keep it small, a root like ~/dev can be enormous.
+  apps = {
+    paths = {},          -- e.g. { "~/dev", "~/Downloads" }
+    depth = 3,
+  },
+
   -- Positional shortcuts for whatever the list is showing: the nth key activates
   -- the nth row, with the back row skipped so the numbering matches the items.
   -- `shortcuts = false` removes them; `mods` takes the same names as `hotkey.mods`.

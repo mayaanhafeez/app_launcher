@@ -34,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             panel.vimEnabled = settings.vimMode
             menu.backRow = settings.back
             panel.shortcuts = settings.shortcuts
+            appIndex.apply(scan: settings.apps)
             if hotKey?.register(settings.hotKey) == false {
                 panel.showNotice("Unknown hotkey: \(settings.hotKey.key)")
             }
