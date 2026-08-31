@@ -34,7 +34,7 @@ final class MenuController {
 
     func activate(_ row: DisplayRow) {
         if row.kind == .app {
-            appIndex.launch(id: String(row.id.dropFirst(4)))
+            appIndex.launch(path: String(row.id.dropFirst(4)))
             onDismiss?()
             return
         }
@@ -80,7 +80,7 @@ final class MenuController {
         rows.append(contentsOf: candidates.compactMap { node in
             let score = trimmed.isEmpty ? node.order : FuzzyMatcher.score(trimmed, in: "\(node.label) \(node.detail) \(node.id)")
             guard let score else { return nil }
-            return DisplayRow(id: node.id, kind: node.kind, label: node.label, detail: trimmed.isEmpty ? node.detail : path(for: node), symbol: node.symbol, image: nil, score: score)
+            return DisplayRow(id: node.id, kind: node.kind, label: node.label, detail: trimmed.isEmpty ? node.detail : path(for: node), symbol: node.symbol, image: nil, score: score, section: node.parent == activeMenu ? "current" : "drilldown")
         })
         rows.sort { $0.score == $1.score ? $0.label < $1.label : $0.score < $1.score }
         let baseRows = Array(rows.prefix(14))

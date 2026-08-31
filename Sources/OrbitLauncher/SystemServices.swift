@@ -85,11 +85,11 @@ final class IPCServer: @unchecked Sendable {
         let client = accept(socket, nil, nil)
         guard client >= 0 else { return }
         queue.async { [weak self] in
-            defer { close(client) }
             var buffer = [UInt8](repeating: 0, count: 65_536)
             let count = read(client, &buffer, buffer.count)
-            guard count > 0, let request = try? JSONDecoder().decode(IPCRequest.self, from: Data(buffer.prefix(count))) else { return }
+            guard count > 0, let request = try? JSONDecoder().decode(IPCRequest.self, from: Data(buffer.prefix(count))) else { close(client); return }
             Task { @MainActor [weak self] in
+                defer { close(client) }
                 let response = self?.handler?(request) ?? IPCResponse(ok: false, message: "No handler")
                 if let data = try? JSONEncoder().encode(response) { data.withUnsafeBytes { _ = write(client, $0.baseAddress, data.count) } }
             }

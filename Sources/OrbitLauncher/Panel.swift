@@ -5,31 +5,41 @@ final class LauncherPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+final class LauncherField: NSTextField {
+    var routeKey: ((NSEvent) -> Bool)?
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if routeKey?(event) == true { return true }
+        return super.performKeyEquivalent(with: event)
+    }
+}
+
 @MainActor
-final class PanelController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
+final class PanelController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
     private let blur = NSVisualEffectView()
-    private let search = NSSearchField()
-    private let titleLabel = NSTextField(labelWithString: "Go")
+    private let card = NSView()
+    private let prompt = NSTextField(labelWithString: "Go...")
+    private let input = LauncherField()
     private let table = NSTableView()
     private let scroll = NSScrollView()
-    private let notice = NSTextField(labelWithString: "")
+    private let notice = NSTextField(wrappingLabelWithString: "")
     private var rows: [DisplayRow] = []
     private var theme = Theme()
+    private var title = "Go"
     var onQuery: ((String) -> Void)?
     var onActivate: ((DisplayRow) -> Void)?
     var onBack: (() -> Bool)?
 
     init() {
-        let panel = LauncherPanel(contentRect: NSRect(x: 0, y: 0, width: 600, height: 570), styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView], backing: .buffered, defer: false)
-        panel.level = .floating
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        let panel = LauncherPanel(contentRect: NSRect(x: 0, y: 0, width: 430, height: 548), styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView], backing: .buffered, defer: false)
+        panel.level = .popUpMenu
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
+        panel.becomesKeyOnlyIfNeeded = false
         panel.isMovableByWindowBackground = true
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = true
-        panel.titleVisibility = .hidden
         super.init(window: panel)
         buildUI(panel)
     }
@@ -38,25 +48,25 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
 
     func show(route: String = "root") {
         guard let panel = window else { return }
-        if let screen = NSScreen.main {
-            let x = screen.visibleFrame.midX - panel.frame.width / 2
-            let y = screen.visibleFrame.midY - panel.frame.height / 2 + 40
-            panel.setFrameOrigin(NSPoint(x: x, y: y))
+        if let screen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? NSScreen.main {
+            panel.setFrameOrigin(NSPoint(x: screen.visibleFrame.midX - panel.frame.width / 2, y: screen.visibleFrame.midY - panel.frame.height / 2 + 28))
         }
-        search.stringValue = ""
+        input.stringValue = ""
+        updatePrompt()
         panel.orderFrontRegardless()
         panel.makeKey()
-        panel.makeFirstResponder(search)
+        panel.makeFirstResponder(input)
     }
 
     func hide() { window?.orderOut(nil) }
-    func toggle() { window?.isVisible == true ? hide() : show() }
 
     func update(title: String, rows: [DisplayRow]) {
-        titleLabel.stringValue = title
+        self.title = title
         self.rows = rows
+        updatePrompt()
         table.reloadData()
-        if !rows.isEmpty { table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false); table.scrollRowToVisible(0) }
+        if rows.isEmpty { table.deselectAll(nil) }
+        else { table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false); table.scrollRowToVisible(0) }
     }
 
     func showNotice(_ message: String) {
@@ -68,87 +78,132 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
     func apply(theme: Theme) {
         self.theme = theme
         blur.material = theme.blur > 0.5 ? .hudWindow : .menu
-        blur.layer?.backgroundColor = theme.bg.withAlphaComponent(0.82).cgColor
-        blur.layer?.cornerRadius = theme.radius
-        blur.layer?.cornerCurve = .continuous
-        blur.layer?.borderWidth = 1
-        blur.layer?.borderColor = theme.border.cgColor
-        titleLabel.textColor = theme.fgMuted
-        titleLabel.font = NSFont(name: theme.font, size: theme.fontSize - 2) ?? .systemFont(ofSize: theme.fontSize - 2, weight: .medium)
-        search.font = NSFont(name: theme.font, size: theme.fontSize + 5) ?? .systemFont(ofSize: theme.fontSize + 5, weight: .medium)
+        card.layer?.backgroundColor = theme.bg.withAlphaComponent(0.88).cgColor
+        card.layer?.cornerRadius = theme.radius
+        card.layer?.cornerCurve = .continuous
+        card.layer?.borderWidth = 1
+        card.layer?.borderColor = theme.border.cgColor
+        prompt.textColor = theme.fgMuted
+        prompt.font = font(size: theme.fontSize + 3, weight: .medium)
+        input.textColor = theme.fg
+        input.font = font(size: theme.fontSize + 3, weight: .medium)
         notice.textColor = theme.fg
-        table.rowHeight = theme.rowHeight
+        table.rowHeight = 52
         table.reloadData()
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let item = rows[row]
         let cell = RowView()
-        cell.configure(item: item, theme: theme)
+        cell.configure(item: rows[row], theme: theme)
         return cell
     }
 
-    func tableViewSelectionDidChange(_ notification: Notification) {}
+    func controlTextDidChange(_ obj: Notification) {
+        updatePrompt()
+        onQuery?(input.stringValue)
+    }
 
-    func controlTextDidChange(_ obj: Notification) { onQuery?(search.stringValue) }
-
-    override func keyDown(with event: NSEvent) {
-        switch event.keyCode {
-        case 53:
-            if !search.stringValue.isEmpty { search.stringValue = ""; onQuery?("") }
-            else { hide() }
-        case 125: moveSelection(1)
-        case 126: moveSelection(-1)
-        case 36, 76:
-            let index = max(0, table.selectedRow)
-            if rows.indices.contains(index) { onActivate?(rows[index]) }
-        case 123 where search.stringValue.isEmpty:
-            if onBack?() != true { hide() }
-        default: super.keyDown(with: event)
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        switch commandSelector {
+        case #selector(NSResponder.moveUp(_:)): moveSelection(-1); return true
+        case #selector(NSResponder.moveDown(_:)): moveSelection(1); return true
+        case #selector(NSResponder.insertNewline(_:)): activateSelection(); return true
+        case #selector(NSResponder.cancelOperation(_:)): escape(); return true
+        case #selector(NSResponder.moveLeft(_:)) where input.stringValue.isEmpty: _ = goBack(); return true
+        default: return false
         }
+    }
+
+    private func routeKey(_ event: NSEvent) -> Bool {
+        switch event.keyCode {
+        case 53: escape(); return true
+        case 125: moveSelection(1); return true
+        case 126: moveSelection(-1); return true
+        case 36, 76: activateSelection(); return true
+        case 123 where input.stringValue.isEmpty: return goBack()
+        default: return false
+        }
+    }
+
+    private func escape() {
+        if !input.stringValue.isEmpty { input.stringValue = ""; updatePrompt(); onQuery?("") }
+        else { hide() }
+    }
+
+    private func goBack() -> Bool {
+        let handled = onBack?() == true
+        if !handled { hide() }
+        return true
     }
 
     private func moveSelection(_ delta: Int) {
         guard !rows.isEmpty else { return }
-        let next = (max(0, table.selectedRow) + delta + rows.count) % rows.count
+        let current = table.selectedRow < 0 ? 0 : table.selectedRow
+        let next = (current + delta + rows.count) % rows.count
         table.selectRowIndexes(IndexSet(integer: next), byExtendingSelection: false)
         table.scrollRowToVisible(next)
+    }
+
+    private func activateSelection() {
+        let index = table.selectedRow < 0 ? 0 : table.selectedRow
+        if rows.indices.contains(index) { onActivate?(rows[index]) }
+    }
+
+    private func updatePrompt() {
+        prompt.stringValue = input.stringValue.isEmpty ? "\(title)..." : ""
+    }
+
+    private func font(size: CGFloat, weight: NSFont.Weight) -> NSFont {
+        NSFont(name: theme.font, size: size) ?? .systemFont(ofSize: size, weight: weight)
     }
 
     private func buildUI(_ panel: NSPanel) {
         blur.state = .active
         blur.blendingMode = .behindWindow
-        blur.wantsLayer = true
         panel.contentView = blur
-        [search, titleLabel, scroll, notice].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; blur.addSubview($0) }
-        titleLabel.stringValue = "Go"
-        search.placeholderString = "Search apps and commands"
-        search.focusRingType = .none
-        search.delegate = self
+        blur.wantsLayer = true
+        card.wantsLayer = true
+        [card].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; blur.addSubview($0) }
+        [prompt, input, scroll, notice].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; card.addSubview($0) }
+
+        input.isBordered = false
+        input.isBezeled = false
+        input.drawsBackground = false
+        input.focusRingType = .none
+        input.delegate = self
+        input.cell?.isScrollable = true
+        input.routeKey = { [weak self] event in self?.routeKey(event) ?? false }
+        prompt.lineBreakMode = .byTruncatingTail
+
         table.headerView = nil
         table.backgroundColor = .clear
         table.selectionHighlightStyle = .none
-        table.intercellSpacing = NSSize(width: 0, height: 5)
+        table.intercellSpacing = NSSize(width: 0, height: 4)
         table.delegate = self
         table.dataSource = self
-        table.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("row")))
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("row"))
+        column.resizingMask = .autoresizingMask
+        table.addTableColumn(column)
         table.target = self
         table.doubleAction = #selector(doubleClick)
         scroll.documentView = table
         scroll.hasVerticalScroller = false
         scroll.drawsBackground = false
+
         notice.wantsLayer = true
         notice.layer?.backgroundColor = NSColor.systemRed.withAlphaComponent(0.92).cgColor
         notice.layer?.cornerRadius = 8
         notice.alignment = .center
         notice.isHidden = true
+
         NSLayoutConstraint.activate([
-            titleLabel.topAnchor.constraint(equalTo: blur.topAnchor, constant: 22), titleLabel.leadingAnchor.constraint(equalTo: blur.leadingAnchor, constant: 24),
-            search.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 8), search.leadingAnchor.constraint(equalTo: blur.leadingAnchor, constant: 20), search.trailingAnchor.constraint(equalTo: blur.trailingAnchor, constant: -20), search.heightAnchor.constraint(equalToConstant: 44),
-            scroll.topAnchor.constraint(equalTo: search.bottomAnchor, constant: 14), scroll.leadingAnchor.constraint(equalTo: blur.leadingAnchor, constant: 16), scroll.trailingAnchor.constraint(equalTo: blur.trailingAnchor, constant: -16), scroll.bottomAnchor.constraint(equalTo: blur.bottomAnchor, constant: -16),
-            notice.leadingAnchor.constraint(equalTo: blur.leadingAnchor, constant: 20), notice.trailingAnchor.constraint(equalTo: blur.trailingAnchor, constant: -20), notice.bottomAnchor.constraint(equalTo: blur.bottomAnchor, constant: -20), notice.heightAnchor.constraint(greaterThanOrEqualToConstant: 34),
+            card.leadingAnchor.constraint(equalTo: blur.leadingAnchor), card.trailingAnchor.constraint(equalTo: blur.trailingAnchor), card.topAnchor.constraint(equalTo: blur.topAnchor), card.bottomAnchor.constraint(equalTo: blur.bottomAnchor),
+            input.topAnchor.constraint(equalTo: card.topAnchor, constant: 18), input.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 22), input.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -22), input.heightAnchor.constraint(equalToConstant: 34),
+            prompt.leadingAnchor.constraint(equalTo: input.leadingAnchor), prompt.trailingAnchor.constraint(equalTo: input.trailingAnchor), prompt.centerYAnchor.constraint(equalTo: input.centerYAnchor),
+            scroll.topAnchor.constraint(equalTo: input.bottomAnchor, constant: 13), scroll.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 12), scroll.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -12), scroll.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -12),
+            notice.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 14), notice.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -14), notice.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -14), notice.heightAnchor.constraint(greaterThanOrEqualToConstant: 38),
         ])
     }
 
@@ -167,15 +222,13 @@ final class RowView: NSTableCellView {
         wantsLayer = true
         [iconView, symbol, label, detail, chevron].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; addSubview($0) }
         iconView.imageScaling = .scaleProportionallyUpOrDown
-        symbol.contentTintColor = .labelColor
         detail.lineBreakMode = .byTruncatingTail
-        chevron.contentTintColor = .tertiaryLabelColor
         NSLayoutConstraint.activate([
-            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14), iconView.centerYAnchor.constraint(equalTo: centerYAnchor), iconView.widthAnchor.constraint(equalToConstant: 32), iconView.heightAnchor.constraint(equalToConstant: 32),
-            symbol.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 18), symbol.centerYAnchor.constraint(equalTo: centerYAnchor), symbol.widthAnchor.constraint(equalToConstant: 23), symbol.heightAnchor.constraint(equalToConstant: 23),
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 58), label.topAnchor.constraint(equalTo: topAnchor, constant: 8), label.trailingAnchor.constraint(lessThanOrEqualTo: chevron.leadingAnchor, constant: -10),
-            detail.leadingAnchor.constraint(equalTo: label.leadingAnchor), detail.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 1), detail.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -35),
-            chevron.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14), chevron.centerYAnchor.constraint(equalTo: centerYAnchor), chevron.widthAnchor.constraint(equalToConstant: 11),
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12), iconView.centerYAnchor.constraint(equalTo: centerYAnchor), iconView.widthAnchor.constraint(equalToConstant: 28), iconView.heightAnchor.constraint(equalToConstant: 28),
+            symbol.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 15), symbol.centerYAnchor.constraint(equalTo: centerYAnchor), symbol.widthAnchor.constraint(equalToConstant: 21), symbol.heightAnchor.constraint(equalToConstant: 21),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 51), label.topAnchor.constraint(equalTo: topAnchor, constant: 7), label.trailingAnchor.constraint(lessThanOrEqualTo: chevron.leadingAnchor, constant: -8),
+            detail.leadingAnchor.constraint(equalTo: label.leadingAnchor), detail.topAnchor.constraint(equalTo: label.bottomAnchor), detail.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -32),
+            chevron.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12), chevron.centerYAnchor.constraint(equalTo: centerYAnchor), chevron.widthAnchor.constraint(equalToConstant: 9),
         ])
     }
 
@@ -185,19 +238,22 @@ final class RowView: NSTableCellView {
         iconView.image = item.image
         iconView.isHidden = item.image == nil
         symbol.image = item.image == nil && !item.symbol.isEmpty ? NSImage(systemSymbolName: item.symbol, accessibilityDescription: nil) : nil
+        symbol.contentTintColor = theme.fg
         symbol.isHidden = symbol.image == nil
         label.stringValue = item.label
         label.textColor = theme.fg
         label.font = NSFont(name: theme.font, size: theme.fontSize) ?? .systemFont(ofSize: theme.fontSize, weight: .medium)
         detail.stringValue = item.detail
         detail.textColor = theme.fgMuted
-        detail.font = NSFont(name: theme.font, size: theme.fontSize - 2) ?? .systemFont(ofSize: theme.fontSize - 2)
+        detail.font = NSFont(name: theme.font, size: theme.fontSize - 3) ?? .systemFont(ofSize: theme.fontSize - 3)
+        detail.isHidden = item.detail.isEmpty
+        chevron.contentTintColor = theme.fgMuted
         chevron.isHidden = item.kind != .menu
-        layer?.cornerRadius = max(8, theme.radius - 6)
+        layer?.cornerRadius = max(8, theme.radius - 7)
         layer?.cornerCurve = .continuous
     }
 
     override var backgroundStyle: NSView.BackgroundStyle {
-        didSet { layer?.backgroundColor = backgroundStyle == .emphasized ? NSColor.controlAccentColor.withAlphaComponent(0.32).cgColor : NSColor.clear.cgColor }
+        didSet { layer?.backgroundColor = backgroundStyle == .emphasized ? NSColor.controlAccentColor.withAlphaComponent(0.3).cgColor : NSColor.clear.cgColor }
     }
 }

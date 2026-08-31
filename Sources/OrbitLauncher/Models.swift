@@ -28,6 +28,7 @@ struct DisplayRow: @unchecked Sendable {
     let symbol: String
     let image: NSImage?
     let score: Int
+    let section: String
 }
 
 struct AppEntry: @unchecked Sendable {

@@ -197,7 +197,7 @@ final class LuaRuntime: @unchecked Sendable {
             if lua_type(state, -1) == LUA_TTABLE {
                 func field(_ name: String) -> String { lua_getfield(state, -1, name); defer { lua_settop(state, -2) }; return luaString(state, -1) ?? "" }
                 let label = field("label")
-                if !label.isEmpty { rows.append(DisplayRow(id: "provider:\(index)", kind: .notice, label: label, detail: field("detail"), symbol: field("symbol"), image: nil, score: index)) }
+                if !label.isEmpty { rows.append(DisplayRow(id: "provider:\(index)", kind: .notice, label: label, detail: field("detail"), symbol: field("symbol"), image: nil, score: index, section: "provider")) }
             }
             lua_settop(state, -2)
         }
@@ -214,6 +214,8 @@ final class LuaRuntime: @unchecked Sendable {
     private static let defaultNodes = [
         MenuNode(id: "root", parent: "", kind: .menu, label: "Go", detail: "", symbol: "", provider: nil, actionReference: nil, order: 0),
         MenuNode(id: "apps", parent: "root", kind: .menu, label: "Applications", detail: "Installed applications", symbol: "square.grid.2x2", provider: nil, actionReference: nil, order: 1),
+        MenuNode(id: "system", parent: "root", kind: .menu, label: "System", detail: "Settings and session", symbol: "gearshape", provider: nil, actionReference: nil, order: 2),
+        MenuNode(id: "tools", parent: "root", kind: .menu, label: "Tools", detail: "Everyday utilities", symbol: "hammer", provider: nil, actionReference: nil, order: 3),
     ]
 }
 

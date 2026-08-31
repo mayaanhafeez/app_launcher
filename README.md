@@ -26,6 +26,6 @@ orbitctl reload
 orbitctl ping
 ```
 
-The Unix socket is `~/Library/Containers/com.orbit.launcher/Data/Library/Application Support/OrbitLauncher/orbit.sock` and is mode `0600`.
+The Unix socket is `~/Library/Containers/com.orbit.launcher/Data/tmp/orbit.sock` and is mode `0600`.
 
 Lua menu entries are data-only native row contracts. Supported fields are `id`, `parent`, `label`, `detail`, `symbol`, `provider`, and `action`. UI layout remains entirely native; new visual behavior should be implemented as a native row type rather than Lua layout.

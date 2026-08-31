@@ -10,7 +10,7 @@ if arguments.first == "--help" || arguments.first == "help" {
     exit(0)
 }
 let request = Request(command: arguments.first ?? "toggle", argument: arguments.dropFirst().first)
-let socketPath = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Containers/com.orbit.launcher/Data/Library/Application Support/OrbitLauncher/orbit.sock").path
+let socketPath = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Containers/com.orbit.launcher/Data/tmp/orbit.sock").path
 let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
 guard descriptor >= 0 else { fputs("orbitctl: socket failed\n", stderr); exit(1) }
 defer { close(descriptor) }

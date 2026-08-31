@@ -49,7 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startIPC() {
-        let container = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Containers/com.orbit.launcher/Data/Library/Application Support/OrbitLauncher")
+        let container = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Containers/com.orbit.launcher/Data/tmp")
         let server = IPCServer(socketURL: container.appendingPathComponent("orbit.sock"))
         server.handler = { [weak self] request in self?.handle(request) ?? IPCResponse(ok: false, message: "Host unavailable") }
         do { try server.start(); ipc = server } catch { panel.showNotice(error.localizedDescription) }

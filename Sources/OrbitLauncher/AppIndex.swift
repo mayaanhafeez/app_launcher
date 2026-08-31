@@ -26,13 +26,12 @@ final class AppIndex: NSObject, NSMetadataQueryDelegate {
     func results(for query: String, limit: Int = 12) -> [DisplayRow] {
         entries.compactMap { entry -> DisplayRow? in
             guard let score = FuzzyMatcher.score(query, in: entry.searchText) else { return nil }
-            return DisplayRow(id: "app:\(entry.id)", kind: .app, label: entry.name, detail: entry.path, symbol: "", image: entry.icon, score: score)
+            return DisplayRow(id: "app:\(entry.path)", kind: .app, label: entry.name, detail: entry.path, symbol: "", image: entry.icon, score: score, section: "apps")
         }.sorted { $0.score == $1.score ? $0.label < $1.label : $0.score < $1.score }.prefix(limit).map { $0 }
     }
 
-    func launch(id: String) {
-        guard let entry = entries.first(where: { $0.id == id }) else { return }
-        NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: entry.path), configuration: .init())
+    func launch(path: String) {
+        NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: path), configuration: .init())
     }
 
     private func merge(_ incoming: [AppEntry]) {
@@ -73,4 +72,6 @@ final class AppIndex: NSObject, NSMetadataQueryDelegate {
             Task { @MainActor [weak self] in self?.merge(built) }
         }
     }
+
+    func metadataQueryDidUpdate(_ notification: Notification) { metadataQueryDidFinishGathering(notification) }
 }
