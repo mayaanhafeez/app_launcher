@@ -11,7 +11,7 @@ open .build/OrbitLauncher.app
 swift run orbitctl toggle
 ```
 
-The global hotkey is `Option-Command-Space`. The app has no Dock or menu-bar item.
+The global hotkey is `Option-Space`. The app has no Dock or menu-bar item.
 
 Copy `Config/config.lua` and `Config/theme.lua` to `~/.config/orbit/` to start customizing. Config changes rebuild the complete menu Lua state. Theme changes use a separate restricted state and only restyle the warm panel.
 
@@ -48,11 +48,21 @@ return {
       label = "Open project in Finder",
       applescript = 'tell application "Finder" to open POSIX file "/Users/me/code/my-app"',
     },
+    {
+      id = "dev.xcode",
+      label = "Open Xcode directly",
+      open = "/Applications/Xcode.app",
+    },
+    {
+      id = "dev.docs",
+      label = "Open documentation",
+      url = "https://developer.apple.com/documentation/",
+    },
   },
 }
 ```
 
-`shell` commands always open in the user's default Terminal application. The command is Base64-transported into the terminal session, so quotes, newlines, pipes, and redirects are preserved. `applescript` is passed directly to `/usr/bin/osascript`.
+`shell` commands always open in Terminal and are the default action type. The command is Base64-transported into the terminal session, so quotes, newlines, pipes, and redirects are preserved. `applescript` is passed directly to `/usr/bin/osascript`. `open` launches an app bundle directly through `NSWorkspace`; `url` opens a URL through the user's default handler.
 
 Advanced handlers may use the same helpers:
 
@@ -69,4 +79,4 @@ Advanced handlers may use the same helpers:
 
 `run(command)` remains an alias of `terminal(command)`. Lua has no `io` module and `os.execute` is removed; all external execution goes through `terminal`, `run`, or `osascript` and is logged by the host. Provider functions run in isolated states without these execution helpers.
 
-Supported item fields are `id`, `parent`, `label`, `detail`, `symbol`, `provider`, `shell`, `applescript`, and `action`. UI layout remains native; new visual behavior should be implemented as a native row type rather than Lua layout.
+Supported item fields are `id`, `parent`, `label`, `detail`, `symbol`, `provider`, `shell`, `applescript`, `open`, `url`, and `action`. UI layout remains native; new visual behavior should be implemented as a native row type rather than Lua layout.

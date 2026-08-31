@@ -104,6 +104,8 @@ final class LuaRuntime: @unchecked Sendable {
         switch scriptAction {
         case .shell(let command): launchTerminal(command)
         case .appleScript(let source): launchAppleScript(source)
+        case .open(let target): NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: target), configuration: .init())
+        case .url(let target): if let url = URL(string: target) { NSWorkspace.shared.open(url) }
         }
     }
 
@@ -200,6 +202,8 @@ final class LuaRuntime: @unchecked Sendable {
         let provider = field("provider")
         let shell = field("shell")
         let appleScript = field("applescript")
+        let open = field("open")
+        let url = field("url")
         lua_getfield(state, -1, "action")
         var actionReference: Int32?
         if lua_type(state, -1) == LUA_TFUNCTION {
@@ -207,7 +211,10 @@ final class LuaRuntime: @unchecked Sendable {
             actionReference = luaL_ref(state, CLUA_REGISTRYINDEX)
         }
         lua_settop(state, -2)
-        let scriptAction = shell.map(ScriptAction.shell) ?? appleScript.map(ScriptAction.appleScript)
+        let scriptAction = shell.map(ScriptAction.shell)
+            ?? appleScript.map(ScriptAction.appleScript)
+            ?? open.map(ScriptAction.open)
+            ?? url.map(ScriptAction.url)
         let kind: RowKind = actionReference != nil || scriptAction != nil ? .action : .menu
         return MenuNode(id: id, parent: id == "root" ? "" : parent, kind: kind, label: label, detail: detail, symbol: symbol, provider: provider, actionReference: actionReference, scriptAction: scriptAction, order: order)
     }

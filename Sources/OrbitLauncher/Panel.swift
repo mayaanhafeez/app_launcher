@@ -134,8 +134,10 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
     }
 
     private func escape() {
-        if !input.stringValue.isEmpty { input.stringValue = ""; updatePrompt(); onQuery?("") }
-        else { hide() }
+        input.stringValue = ""
+        updatePrompt()
+        onQuery?("")
+        _ = goBack()
     }
 
     private func goBack() -> Bool {

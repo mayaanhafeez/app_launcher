@@ -24,6 +24,8 @@ struct MenuNode: Sendable {
 enum ScriptAction: Sendable {
     case shell(String)
     case appleScript(String)
+    case open(String)
+    case url(String)
 }
 
 struct DisplayRow: @unchecked Sendable {

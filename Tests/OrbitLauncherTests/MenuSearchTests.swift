@@ -16,3 +16,15 @@ import Testing
     controller.update(query: "web")
     #expect(labels == ["Web server"])
 }
+
+@MainActor
+@Test func escapeNavigationContract() {
+    let controller = MenuController(appIndex: AppIndex(), runtime: LuaRuntime())
+    controller.nodes = [
+        MenuNode(id: "root", parent: "", kind: .menu, label: "Go", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: nil, order: 0),
+        MenuNode(id: "setup", parent: "root", kind: .menu, label: "Setup", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: nil, order: 1),
+    ]
+    controller.open(route: "setup")
+    #expect(controller.back())
+    #expect(!controller.back())
+}

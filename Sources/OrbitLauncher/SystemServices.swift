@@ -18,7 +18,7 @@ final class GlobalHotKey {
         }
         InstallEventHandler(GetApplicationEventTarget(), callback, 1, &spec, Unmanaged.passUnretained(self).toOpaque(), &handler)
         let id = EventHotKeyID(signature: OSType(0x4f524254), id: 1)
-        RegisterEventHotKey(UInt32(kVK_Space), UInt32(cmdKey | optionKey), id, GetApplicationEventTarget(), 0, &reference)
+        RegisterEventHotKey(UInt32(kVK_Space), UInt32(optionKey), id, GetApplicationEventTarget(), 0, &reference)
     }
 }
 
