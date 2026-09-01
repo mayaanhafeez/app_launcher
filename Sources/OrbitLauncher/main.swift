@@ -125,17 +125,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do { try server.start(); ipc = server } catch { panel.showNotice(error.localizedDescription) }
     }
 
+    /// The verb table itself lives in `IPCCommands`, which needs no NSApplication;
+    /// this only binds each effect to the delegate's objects.
     private func handle(_ request: IPCRequest) -> IPCResponse {
-        switch request.command {
-        case "ping": return IPCResponse(ok: true, message: "ok")
-        case "toggle": toggle(route: request.argument ?? "root"); return IPCResponse(ok: true, message: "ok")
-        case "show": show(route: request.argument ?? "root"); return IPCResponse(ok: true, message: "ok")
-        case "hide": panel.hide(); return IPCResponse(ok: true, message: "ok")
-        case "reload": reloadAll(); return IPCResponse(ok: true, message: "ok")
-        case "theme": return IPCResponse(ok: true, message: themeRuntime.paletteName.isEmpty ? "(no palette)" : themeRuntime.paletteName)
-        case "invoke": return menu.invoke(id: request.argument ?? "") ? IPCResponse(ok: true, message: "ok") : IPCResponse(ok: false, message: "unknown node")
-        default: return IPCResponse(ok: false, message: "unknown command")
-        }
+        IPCCommands(
+            toggle: { [weak self] route in self?.toggle(route: route) },
+            show: { [weak self] route in self?.show(route: route) },
+            hide: { [weak self] in self?.panel.hide() },
+            reload: { [weak self] in self?.reloadAll() },
+            paletteName: { [weak self] in self?.themeRuntime.paletteName ?? "" },
+            version: { Self.bundleVersion },
+            invoke: { [weak self] id in self?.menu.invoke(id: id) ?? false }
+        ).handle(request)
+    }
+
+    /// `CFBundleShortVersionString (CFBundleVersion)`, or a plain marker when running
+    /// the bare `swift build` binary, which has no Info.plist at all.
+    private static var bundleVersion: String {
+        let info = Bundle.main.infoDictionary
+        guard let short = info?["CFBundleShortVersionString"] as? String else { return "unbundled" }
+        let build = info?["CFBundleVersion"] as? String ?? "0"
+        return "\(short) (\(build))"
     }
 
     private func toggle(route: String) { panel.window?.isVisible == true ? panel.hide() : show(route: route) }

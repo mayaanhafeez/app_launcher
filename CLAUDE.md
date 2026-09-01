@@ -241,10 +241,13 @@ the app.
 
 `IPCServer` binds a `0600` Unix socket at
 `~/Library/Containers/com.orbit.launcher/Data/tmp/orbit.sock`. One request, one response, connection closed. The handler
-runs on `@MainActor`. Commands: `ping`, `toggle [route]`, `show [route]`, `hide`, `reload`, `invoke <node-id>`. Adding a
-command means editing the switch in `AppDelegate.handle(_:)` — `orbitctl` forwards whatever verb it's given and needs no
-change. `theme` reports the resolved palette name, which is the quickest way to check what a config
-actually loaded.
+runs on `@MainActor`. Commands: `ping`, `toggle [route]`, `show [route]`, `hide`, `reload`, `theme`, `version`,
+`invoke <node-id>`. The verb switch lives in `IPCCommands` (`SystemServices.swift`), which holds no AppKit state —
+`AppDelegate.handle(_:)` only binds each effect to the delegate's objects, so the command surface is testable without an
+`NSApplication`. Adding a command means editing that switch and adding a closure; `orbitctl` forwards whatever verb it's
+given and needs no change. `theme` reports the resolved palette name, which is the quickest way to check what a config
+actually loaded; `version` reads the bundle's stamped plist rather than a compiled-in constant, so it cannot drift from
+the tag `scripts/build-app.sh` built from.
 
 Routes resolve through `MenuController.node(matching:)`: an exact id wins over any alias, and
 underscores normalise to dashes. Unknown routes silently resolve to `root`; `invoke` on a category

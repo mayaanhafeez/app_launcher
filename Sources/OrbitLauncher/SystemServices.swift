@@ -75,7 +75,9 @@ final class MenuBarItem: NSObject, NSMenuDelegate {
 final class GlobalHotKey {
     private var reference: EventHotKeyRef?
     private var handler: EventHandlerRef?
-    private var current: HotKeySpec?
+    /// Readable so a test can assert that a rejected key name leaves the previous
+    /// binding in place rather than clearing it.
+    private(set) var current: HotKeySpec?
     var action: (() -> Void)?
 
     /// Key names accepted in `config.lua`. Letters and digits resolve on their own.
@@ -213,6 +215,40 @@ final class ConfigWatcher: @unchecked Sendable {
 
 struct IPCRequest: Codable { let command: String; let argument: String? }
 struct IPCResponse: Codable { let ok: Bool; let message: String }
+
+/// The IPC verb table, lifted out of `AppDelegate` so the command surface can be
+/// exercised without an `NSApplication`: the delegate supplies each effect as a
+/// closure and this stays a pure switch over the request. Adding a command means
+/// editing this switch — `orbitctl` forwards whatever verb it is given.
+@MainActor
+struct IPCCommands {
+    var toggle: (String) -> Void = { _ in }
+    var show: (String) -> Void = { _ in }
+    var hide: () -> Void = {}
+    var reload: () -> Void = {}
+    /// The resolved palette name, or empty when the theme set none.
+    var paletteName: () -> String = { "" }
+    var version: () -> String = { "unbundled" }
+    var invoke: (String) -> Bool = { _ in false }
+
+    func handle(_ request: IPCRequest) -> IPCResponse {
+        switch request.command {
+        case "ping": return IPCResponse(ok: true, message: "ok")
+        case "toggle": toggle(request.argument ?? "root"); return IPCResponse(ok: true, message: "ok")
+        case "show": show(request.argument ?? "root"); return IPCResponse(ok: true, message: "ok")
+        case "hide": hide(); return IPCResponse(ok: true, message: "ok")
+        case "reload": reload(); return IPCResponse(ok: true, message: "ok")
+        case "theme":
+            let name = paletteName()
+            return IPCResponse(ok: true, message: name.isEmpty ? "(no palette)" : name)
+        // Reads the bundle, not a constant: scripts/build-app.sh stamps the plist
+        // from `git describe`, so a compiled-in string would drift from the tag.
+        case "version": return IPCResponse(ok: true, message: version())
+        case "invoke": return invoke(request.argument ?? "") ? IPCResponse(ok: true, message: "ok") : IPCResponse(ok: false, message: "unknown node")
+        default: return IPCResponse(ok: false, message: "unknown command")
+        }
+    }
+}
 
 final class IPCServer: @unchecked Sendable {
     let socketURL: URL

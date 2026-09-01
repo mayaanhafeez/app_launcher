@@ -362,6 +362,21 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
     }
 
     private func routeKey(_ event: NSEvent) -> Bool {
+        // Editing keys are resolved *before* list shortcuts, and that precedence is the
+        // deliberate half of this: `shortcuts.keys` defaults to digits, which collide
+        // with nothing, but a config that puts letters there would otherwise swallow
+        // ⌘C — and with no Edit menu in the process there is no second way to copy,
+        // whereas the row that chord would have picked is still an arrow key away.
+        // `sendAction(to: nil)` walks the responder chain from the field editor exactly
+        // as a nil-targeted Edit menu item does, so `NSTextView` does the actual work
+        // and its selection and undo registration stay consistent. No editor means the
+        // panel is not taking text, and the chord is somebody else's.
+        if input.currentEditor() != nil,
+           let editing = EditingKeys.action(characters: event.charactersIgnoringModifiers ?? "",
+                                            modifiers: event.modifierFlags),
+           NSApp.sendAction(editing.selector, to: nil, from: input) {
+            return true
+        }
         // Shortcuts are modified keys, so `performKeyEquivalent` does deliver them and
         // this runs before the plain-key cases below can claim one.
         if let position = shortcuts.position(for: event.charactersIgnoringModifiers ?? "",
