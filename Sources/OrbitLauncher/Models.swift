@@ -244,6 +244,60 @@ enum VimKeys {
     }
 }
 
+// MARK: - Editing keys
+
+/// A standard text-editing command, named by the responder action the field editor
+/// already implements. Dispatching to those is what keeps selection, undo
+/// registration and the pasteboard's own rules with `NSTextView` instead of
+/// reimplementing any of it here.
+enum EditingAction: Equatable, Sendable {
+    case selectAll
+    case copy
+    case paste
+    case cut
+    case undo
+    case redo
+
+    var selector: Selector {
+        switch self {
+        case .selectAll: return #selector(NSResponder.selectAll(_:))
+        case .copy: return #selector(NSText.copy(_:))
+        case .paste: return #selector(NSText.paste(_:))
+        case .cut: return #selector(NSText.cut(_:))
+        // No AppKit class declares `undo:`/`redo:` — they are nil-targeted menu
+        // actions that the responder chain resolves onto the field editor's undo
+        // manager, so there is no method for `#selector` to name.
+        case .undo: return Selector(("undo:"))
+        case .redo: return Selector(("redo:"))
+        }
+    }
+}
+
+/// The Edit menu's key equivalents, as a map. The app is `LSUIElement` and never
+/// builds a main menu, so nothing in the process supplies ⌘A/⌘C/⌘V/⌘X/⌘Z to the
+/// field editor — this stands in for the menu that isn't there. Pure, like
+/// `VimKeys`, so the chord rules are testable without a window.
+enum EditingKeys {
+    /// Only the four intent-carrying modifiers are compared, as in `ShortcutSpec`:
+    /// caps lock and the function/numeric-pad bits ride along on ordinary presses.
+    /// The chord has to be exactly ⌘ (⌘⇧ for redo) — ⌘⌥C belongs to somebody else.
+    static func action(characters: String, modifiers: NSEvent.ModifierFlags) -> EditingAction? {
+        let considered: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
+        let flags = modifiers.intersection(considered)
+        guard flags == .command || flags == [.command, .shift] else { return nil }
+        // Shift is the one modifier `charactersIgnoringModifiers` still applies, so
+        // ⌘⇧Z arrives as "Z".
+        switch characters.lowercased() {
+        case "a" where flags == .command: return .selectAll
+        case "c" where flags == .command: return .copy
+        case "v" where flags == .command: return .paste
+        case "x" where flags == .command: return .cut
+        case "z": return flags == .command ? .undo : .redo
+        default: return nil
+        }
+    }
+}
+
 // MARK: - Theme
 
 /// Every value the panel draws with. Layout is native, so this token set *is* the
