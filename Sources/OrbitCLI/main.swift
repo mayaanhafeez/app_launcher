@@ -6,7 +6,7 @@ struct Response: Codable { let ok: Bool; let message: String }
 
 let arguments = Array(CommandLine.arguments.dropFirst())
 if arguments.first == "--help" || arguments.first == "help" {
-    print("Usage: orbitctl [toggle|show|hide|invoke|reload|theme|ping] [route-or-node]")
+    print("Usage: orbitctl [toggle|show|hide|invoke|reload|theme|version|ping] [route-or-node]")
     exit(0)
 }
 let request = Request(command: arguments.first ?? "toggle", argument: arguments.dropFirst().first)

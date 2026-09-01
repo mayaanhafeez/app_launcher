@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# A second push to the same branch makes the first run's result irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    # Pinned rather than macos-latest: the label floats to a new image (and a new
+    # default Xcode) without a commit here, which turns a toolchain change into a
+    # mystery failure on an unrelated PR.
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # scripts/build-app.sh stamps the bundle from `git describe --tags` and
+          # `git rev-list --count HEAD`. The default shallow checkout fetches no
+          # tags and one commit, so both would quietly degrade — `--always` to a
+          # bare hash and the build number to 1 — instead of failing.
+          fetch-depth: 0
+
+      - name: Toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test
+
+      - name: Assemble the app bundle
+        run: scripts/build-app.sh
+
+      # build-app.sh runs `iconutil` and an ad-hoc `codesign --force --sign -`.
+      # Both work on the runner image, but a *silent* degradation would not fail
+      # the script: a missing iconset is skipped by design, and an unsigned bundle
+      # only shows up later as a lost Accessibility grant. Check the artefacts.
+      - name: Verify the bundle
+        run: |
+          set -euo pipefail
+          APP=".build/OrbitLauncher.app"
+          test -x "$APP/Contents/MacOS/OrbitLauncher"
+
+          # Proves fetch-depth: 0 took effect, so the version below is real.
+          test "$(git rev-parse --is-shallow-repository)" = "false"
+
+          SHORT=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist")
+          BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP/Contents/Info.plist")
+          echo "version: $SHORT ($BUILD)"
+          # "0.0.0" is the script's fallback for a git that failed outright.
+          test "$SHORT" != "0.0.0"
+          test "$BUILD" != "0"
+
+          # LSUIElement is what keeps the launcher out of the Dock; without a bundle
+          # carrying it, the accessory behaviour and the container socket path break.
+          test "$(/usr/libexec/PlistBuddy -c "Print :LSUIElement" "$APP/Contents/Info.plist")" = "true"
+
+          # iconutil output. The script skips this step when the iconset is missing,
+          # which would ship an icon-less app rather than fail.
+          test -f "$APP/Contents/Resources/AppIcon.icns"
+
+          # The ad-hoc signature the global hotkey and AppleScript TCC grants hang off.
+          codesign --verify --strict --verbose=2 "$APP"
+          codesign -dv "$APP" 2>&1 | grep -q "Signature=adhoc"

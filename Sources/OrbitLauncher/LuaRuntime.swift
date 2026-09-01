@@ -47,7 +47,10 @@ private func luaString(_ state: OpaquePointer, _ index: Int32) -> String? {
     return String(cString: pointer)
 }
 
-private func terminalScript(_ command: String) -> String {
+/// Internal rather than private so the encoding contract below can be tested
+/// directly: the shipped bug this guards against is invisible from the outside,
+/// since `launchTerminal` only ever hands the string to `osascript`.
+func terminalScript(_ command: String) -> String {
     let encoded = Data(command.utf8).base64EncodedString()
     // The decoded script is `eval`-ed in the window's own shell rather than piped
     // into a new one. Piping puts the script on stdin, which is the very thing
@@ -486,8 +489,14 @@ final class ThemeRuntime: @unchecked Sendable {
             paletteName = palette.name
         }
         func number(_ key: String) -> Double? { lua_getfield(state, -1, key); defer { lua_settop(state, -2) }; return lua_type(state, -1) == LUA_TNUMBER ? lua_tonumberx(state, -1, nil) : nil }
-        func color(_ key: String, _ target: inout NSColor) { if let value = string(key) { target = NSColor(hex: value) } }
-        func optionalColor(_ key: String, _ target: inout NSColor?) { if let value = string(key) { target = NSColor(hex: value) } }
+        // Parsed by `Palette.color(from:)`, the same lenient reader the scheme files
+        // use, so a value copied out of a palette (`0xaarrggbb`, `#rgb`) means here
+        // what it meant there. `NSColor(hex:)` alone accepts only 6 digits and
+        // silently yields black on anything else, which turned a shorthand override
+        // into an unreadable panel with no error. An unparseable value now leaves the
+        // palette-seeded colour standing rather than blacking it out.
+        func color(_ key: String, _ target: inout NSColor) { if let value = string(key), let parsed = Palette.color(from: value) { target = parsed } }
+        func optionalColor(_ key: String, _ target: inout NSColor?) { if let value = string(key), let parsed = Palette.color(from: value) { target = parsed } }
         func alpha(_ key: String, _ target: inout CGFloat) { if let value = number(key) { target = min(1, max(0, value)) } }
         func size(_ key: String, minimum: Double = 0, _ target: inout CGFloat) { if let value = number(key), value >= minimum { target = value } }
 
