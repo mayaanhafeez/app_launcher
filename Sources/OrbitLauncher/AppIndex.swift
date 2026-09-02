@@ -6,6 +6,7 @@ final class AppIndex: NSObject {
     private(set) var entries: [AppEntry] = []
     private let worker = DispatchQueue(label: "orbit.app-index", qos: .utility)
     private var scanSpec = AppScanSpec()
+    private var iconPoints = thumbnailSize
     var onChange: (() -> Void)?
 
     /// The roots every scan covers, before `apps.paths` is added to them.
@@ -26,12 +27,23 @@ final class AppIndex: NSObject {
         rescan()
     }
 
+    /// Icons are flattened once, at scan time, to the size the panel actually draws.
+    /// A theme with a larger `icon_slot` therefore has to re-flatten, or it scales a
+    /// 36pt bitmap up and renders visibly soft.
+    func apply(iconPoints points: CGFloat) {
+        let resolved = max(16, points.rounded())
+        guard resolved != iconPoints else { return }
+        iconPoints = resolved
+        rescan()
+    }
+
     private func rescan() {
         let roots = Self.defaultRoots + scanSpec.paths.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
         let depth = scanSpec.depth
+        let points = iconPoints
         worker.async { [weak self] in
             let built = Self.appPaths(in: roots, depth: depth)
-                .compactMap(Self.makeEntry)
+                .compactMap { Self.makeEntry(path: $0, iconPoints: points) }
                 .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
             Task { @MainActor [weak self] in self?.replace(built) }
         }
@@ -60,10 +72,14 @@ final class AppIndex: NSObject {
         return paths.sorted()
     }
 
-    func results(for query: String, limit: Int = 12) -> [DisplayRow] {
+    /// `bonus` is subtracted from each match's score before the sort — frecency has to
+    /// be applied here rather than to the returned rows, because the truncation to
+    /// `limit` happens inside this sort and would otherwise discard the very apps the
+    /// discount was meant to promote.
+    func results(for query: String, limit: Int = 12, bonus: (String) -> Int = { _ in 0 }) -> [DisplayRow] {
         entries.compactMap { entry -> DisplayRow? in
             guard let score = FuzzyMatcher.score(query, in: entry.searchText) else { return nil }
-            return DisplayRow(id: "app:\(entry.path)", kind: .app, label: entry.name, detail: entry.path, symbol: "", image: entry.icon, score: score, section: "apps")
+            return DisplayRow(id: "app:\(entry.path)", kind: .app, label: entry.name, detail: entry.path, symbol: "", image: entry.icon, score: score - bonus(entry.path), section: "apps")
         }.sorted { $0.score == $1.score ? $0.label < $1.label : $0.score < $1.score }.prefix(limit).map { $0 }
     }
 
@@ -79,7 +95,7 @@ final class AppIndex: NSObject {
         onChange?()
     }
 
-    nonisolated private static func makeEntry(path: String) -> AppEntry? {
+    nonisolated private static func makeEntry(path: String, iconPoints: CGFloat = thumbnailSize) -> AppEntry? {
         let url = URL(fileURLWithPath: path)
         guard url.pathExtension == "app" else { return nil }
         let bundle = Bundle(url: url)

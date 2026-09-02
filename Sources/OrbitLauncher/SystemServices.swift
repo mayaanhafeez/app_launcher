@@ -159,10 +159,18 @@ final class ConfigWatcher: @unchecked Sendable {
 
     private let watchesDirectory: Bool
 
+    private var debounce: TimeInterval = 0.08
+
     init(directory: URL, filenames: [String] = ["config.lua", "theme.lua"], watchesDirectory: Bool = true) {
         self.directory = directory
         self.filenames = filenames
         self.watchesDirectory = watchesDirectory
+    }
+
+    /// Republished from `watch = { debounce }` on every config reload. Set on the
+    /// watcher's own queue, which is the only place `scheduleChange` reads it.
+    func setDebounce(_ interval: TimeInterval) {
+        queue.async { [weak self] in self?.debounce = max(0, interval) }
     }
 
     func start() throws {
@@ -205,7 +213,7 @@ final class ConfigWatcher: @unchecked Sendable {
     }
 
     private func scheduleChange() {
-        queue.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+        queue.asyncAfter(deadline: .now() + debounce) { [weak self] in
             guard let self else { return }
             rearmFileWatches()
             onChange?()
@@ -215,6 +223,31 @@ final class ConfigWatcher: @unchecked Sendable {
 
 struct IPCRequest: Codable { let command: String; let argument: String? }
 struct IPCResponse: Codable { let ok: Bool; let message: String }
+
+/// The JSON `orbitctl list` prints. `DisplayRow` holds an `NSImage`, so it is
+/// projected onto a codable shape rather than made `Codable` itself.
+struct ListingPayload: Codable {
+    struct Row: Codable {
+        let id: String
+        let kind: String
+        let label: String
+        let detail: String
+        let symbol: String
+        let section: String
+        let score: Int
+    }
+
+    let title: String
+    let rows: [Row]
+
+    init(_ listing: (title: String, rows: [DisplayRow])) {
+        title = listing.title
+        rows = listing.rows.map {
+            Row(id: $0.id, kind: $0.kind.rawValue, label: $0.label, detail: $0.detail,
+                symbol: $0.symbol, section: $0.section, score: $0.score)
+        }
+    }
+}
 
 /// The IPC verb table, lifted out of `AppDelegate` so the command surface can be
 /// exercised without an `NSApplication`: the delegate supplies each effect as a
@@ -230,6 +263,8 @@ struct IPCCommands {
     var paletteName: () -> String = { "" }
     var version: () -> String = { "unbundled" }
     var invoke: (String) -> Bool = { _ in false }
+    /// The rows a route would show. Returns nil when there is no menu to ask.
+    var list: (_ route: String, _ query: String) -> (title: String, rows: [DisplayRow])? = { _, _ in nil }
 
     func handle(_ request: IPCRequest) -> IPCResponse {
         switch request.command {
@@ -245,6 +280,21 @@ struct IPCCommands {
         // from `git describe`, so a compiled-in string would drift from the tag.
         case "version": return IPCResponse(ok: true, message: version())
         case "invoke": return invoke(request.argument ?? "") ? IPCResponse(ok: true, message: "ok") : IPCResponse(ok: false, message: "unknown node")
+        // `list [route] [query…]` — the argument is split on the first space, so the
+        // rest is the query. Provider rows are absent: they arrive asynchronously and
+        // this is a synchronous snapshot of the static list.
+        case "list":
+            let parts = (request.argument ?? "").split(separator: " ", maxSplits: 1, omittingEmptySubsequences: false)
+            let route = parts.first.map(String.init) ?? "root"
+            let query = parts.count > 1 ? String(parts[1]) : ""
+            guard let listing = list(route.isEmpty ? "root" : route, query) else {
+                return IPCResponse(ok: false, message: "no menu")
+            }
+            guard let data = try? JSONEncoder().encode(ListingPayload(listing)),
+                  let json = String(data: data, encoding: .utf8) else {
+                return IPCResponse(ok: false, message: "unable to encode listing")
+            }
+            return IPCResponse(ok: true, message: json)
         default: return IPCResponse(ok: false, message: "unknown command")
         }
     }
@@ -292,7 +342,21 @@ final class IPCServer: @unchecked Sendable {
             Task { @MainActor [weak self] in
                 defer { close(client) }
                 let response = self?.handler?(request) ?? IPCResponse(ok: false, message: "No handler")
-                if let data = try? JSONEncoder().encode(response) { data.withUnsafeBytes { _ = write(client, $0.baseAddress, data.count) } }
+                // A `list` reply is far larger than a socket buffer, and `write` is
+                // free to accept only part of it. Loop until it is all gone, or a
+                // long listing arrives at the client as truncated JSON.
+                if let data = try? JSONEncoder().encode(response) {
+                    data.withUnsafeBytes { buffer in
+                        guard var pointer = buffer.baseAddress else { return }
+                        var remaining = buffer.count
+                        while remaining > 0 {
+                            let written = write(client, pointer, remaining)
+                            guard written > 0 else { break }
+                            pointer += written
+                            remaining -= written
+                        }
+                    }
+                }
             }
         }
     }

@@ -73,11 +73,23 @@ struct MenuNode: Sendable {
     let actionReference: Int32?
     let scriptAction: ScriptAction?
     let order: Int
+    /// Exempt from the fuzzy filter and pinned below the filtered results. This is
+    /// what makes `{query}` usable on a static row: an ordinary item goes through the
+    /// filter, so typing the argument removes the very row meant to consume it.
+    var keep: Bool = false
+    /// Never listed, but still reachable by search, alias and `orbitctl invoke` — the
+    /// inverse of `keep`, and the same code path.
+    var hidden: Bool = false
 
     var headerTitle: String { title.isEmpty ? label : title }
     /// Leaf id segment, so `install.editor.zed` is findable by typing "zed".
     var leafID: String { String(id.split(separator: ".").last ?? "") }
-    var searchText: String { "\(label) \(detail) \(leafID) \(aliases.joined(separator: " "))" }
+    var searchText: String { searchText(includingDetail: true) }
+
+    func searchText(includingDetail: Bool) -> String {
+        let base = "\(label) \(leafID) \(aliases.joined(separator: " "))"
+        return includingDetail ? "\(label) \(detail) \(leafID) \(aliases.joined(separator: " "))" : base
+    }
 }
 
 struct DisplayRow: @unchecked Sendable {
@@ -191,8 +203,53 @@ struct AppScanSpec: Sendable, Equatable {
     var depth = 3
 }
 
+/// Frecency weighting, from `ranking = { ... }` in config.lua. Applied only to
+/// searched results: with an empty query the config author's `order` is a deliberate
+/// statement about the shape of the menu, and reordering it under the user would be
+/// rearranging their furniture.
+struct RankingSpec: Sendable, Equatable {
+    var enabled = true
+    /// Seconds after which a row's frecency discount halves. Two weeks by default.
+    var halfLife: TimeInterval = 14 * 24 * 3600
+    /// Ceiling on the discount, in fuzzy-score units. `FuzzyMatcher` charges roughly
+    /// 8 per non-contiguous character, so 12 outranks a match one word deeper without
+    /// overturning a genuinely better one.
+    var weight: Double = 12
+}
+
+/// Result limits, from `search = { ... }` in config.lua. These were compile-time
+/// constants in `MenuController`, which — by the same argument the theme is built on
+/// — made them values no user could ever reach.
+struct SearchSpec: Sendable, Equatable {
+    /// Cap on app rows merged into `root` and `apps` under a non-empty query.
+    var appLimit = 40
+    /// Cap on the whole list. Zero means no cap, which is the historical behaviour.
+    var rowLimit = 0
+    /// How far `isDescendant` and `path(for:)` will walk before giving up. Guards
+    /// against a cycle in hand-written `parent` links as much as against depth.
+    var depth = 32
+    /// Whether a node's `detail` line is part of its haystack.
+    var matchDetail = true
+}
+
+/// Execution limits for Lua providers, from `providers = { ... }` in config.lua.
+struct ProviderSpec: Sendable, Equatable {
+    /// Wall-clock deadline for one provider call.
+    var timeout: TimeInterval = 0.15
+    /// Instruction ceiling enforced by the count hook.
+    var instructions = 1_000_000
+    /// Quiet period before a keystroke runs the provider. Zero — the default — fires
+    /// on every keystroke, exactly as before.
+    var debounce: TimeInterval = 0
+}
+
 struct Settings: Sendable {
     var hotKey = HotKeySpec()
+    var ranking = RankingSpec()
+    var search = SearchSpec()
+    var providers = ProviderSpec()
+    /// Quiet period after a config-directory event before reloading.
+    var watchDebounce: TimeInterval = 0.08
     /// Modal navigation, off unless `vim = true` in config.lua.
     var vimMode = false
     /// Launch at login, off unless `login_item = true` in config.lua. Registering

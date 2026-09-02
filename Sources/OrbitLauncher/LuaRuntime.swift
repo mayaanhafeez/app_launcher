@@ -6,8 +6,12 @@ private let instructionLimit = 1_000_000
 
 private final class ExecutionBudget {
     var instructions = 0
+    let limit: Int
     let deadline: DispatchTime?
-    init(timeout: TimeInterval? = nil) { deadline = timeout.map { .now() + $0 } }
+    init(timeout: TimeInterval? = nil, limit: Int = instructionLimit) {
+        self.limit = limit
+        deadline = timeout.map { .now() + $0 }
+    }
 }
 
 nonisolated(unsafe) private let budgets = NSMapTable<NSValue, ExecutionBudget>(keyOptions: .strongMemory, valueOptions: .strongMemory)
@@ -22,14 +26,14 @@ private let luaBudgetHook: lua_Hook = { state, _ in
     budgetsLock.unlock()
     guard let budget else { return }
     budget.instructions += Int(instructionStep)
-    if budget.instructions > instructionLimit || budget.deadline.map({ DispatchTime.now() > $0 }) == true {
+    if budget.instructions > budget.limit || budget.deadline.map({ DispatchTime.now() > $0 }) == true {
         _ = clua_error(state, "script execution limit exceeded")
     }
 }
 
-private func withBudget<T>(_ state: OpaquePointer, timeout: TimeInterval? = nil, _ body: () throws -> T) rethrows -> T {
+private func withBudget<T>(_ state: OpaquePointer, timeout: TimeInterval? = nil, limit: Int = instructionLimit, _ body: () throws -> T) rethrows -> T {
     budgetsLock.lock()
-    budgets.setObject(ExecutionBudget(timeout: timeout), forKey: stateKey(state))
+    budgets.setObject(ExecutionBudget(timeout: timeout, limit: limit), forKey: stateKey(state))
     budgetsLock.unlock()
     lua_sethook(state, luaBudgetHook, LUA_MASKCOUNT, instructionStep)
     defer {
@@ -129,7 +133,7 @@ final class LuaRuntime: @unchecked Sendable {
         }
     }
 
-    func provider(name: String, menuID: String, query: String, timeout: TimeInterval = 0.15, completion: @escaping @Sendable (Result<[DisplayRow], Error>) -> Void) {
+    func provider(name: String, menuID: String, query: String, timeout: TimeInterval = 0.15, instructions: Int = instructionLimit, completion: @escaping @Sendable (Result<[DisplayRow], Error>) -> Void) {
         queue.async { [weak self] in
             guard let self, let reference = providers[name], let sourceState = state else { completion(.success([])); return }
             guard let dump = dumpFunction(sourceState, reference: reference) else { completion(.failure(RuntimeError.message("Provider is not serializable"))); return }
@@ -140,7 +144,7 @@ final class LuaRuntime: @unchecked Sendable {
             }
             guard loadStatus == LUA_OK else { completion(.failure(RuntimeError.message("Unable to load provider"))); return }
             lua_pushstring(providerState, query)
-            let status = withBudget(providerState, timeout: timeout) { lua_pcallk(providerState, 1, 1, 0, 0, nil) }
+            let status = withBudget(providerState, timeout: timeout, limit: instructions) { lua_pcallk(providerState, 1, 1, 0, 0, nil) }
             guard status == LUA_OK else {
                 completion(.failure(RuntimeError.message(luaString(providerState, -1) ?? "Provider failed")))
                 return
@@ -299,6 +303,43 @@ final class LuaRuntime: @unchecked Sendable {
         }
         lua_settop(state, -2)
 
+        // `ranking = false` switches frecency off; the table form tunes it.
+        lua_getfield(state, -1, "ranking")
+        if lua_type(state, -1) == LUA_TBOOLEAN {
+            settings.ranking.enabled = lua_toboolean(state, -1) != 0
+        } else if lua_type(state, -1) == LUA_TTABLE {
+            if let enabled = boolean(state, field: "enabled") { settings.ranking.enabled = enabled }
+            if let value = number(state, field: "half_life"), value > 0 { settings.ranking.halfLife = value }
+            if let value = number(state, field: "weight"), value >= 0 { settings.ranking.weight = value }
+        }
+        lua_settop(state, -2)
+
+        lua_getfield(state, -1, "search")
+        if lua_type(state, -1) == LUA_TTABLE {
+            if let value = number(state, field: "app_limit") { settings.search.appLimit = max(1, Int(value)) }
+            if let value = number(state, field: "row_limit") { settings.search.rowLimit = max(0, Int(value)) }
+            if let value = number(state, field: "depth") { settings.search.depth = max(1, Int(value)) }
+            if let value = boolean(state, field: "match_detail") { settings.search.matchDetail = value }
+        }
+        lua_settop(state, -2)
+
+        // Deliberately *not* `providers`: that key already holds the provider
+        // functions themselves, and overloading it would put two unrelated meanings
+        // on one name.
+        lua_getfield(state, -1, "provider_limits")
+        if lua_type(state, -1) == LUA_TTABLE {
+            if let value = number(state, field: "timeout"), value > 0 { settings.providers.timeout = value }
+            if let value = number(state, field: "instructions") { settings.providers.instructions = max(10_000, Int(value)) }
+            if let value = number(state, field: "debounce"), value >= 0 { settings.providers.debounce = value }
+        }
+        lua_settop(state, -2)
+
+        lua_getfield(state, -1, "watch")
+        if lua_type(state, -1) == LUA_TTABLE {
+            if let value = number(state, field: "debounce"), value >= 0 { settings.watchDebounce = value }
+        }
+        lua_settop(state, -2)
+
         lua_getfield(state, -1, "hotkey")
         defer { lua_settop(state, -2) }
         guard lua_type(state, -1) == LUA_TTABLE else { return settings }
@@ -307,6 +348,22 @@ final class LuaRuntime: @unchecked Sendable {
         lua_settop(state, -2)
         if let mods = stringList(state, field: "mods") { settings.hotKey.modifiers = mods }
         return settings
+    }
+
+    /// The number under `field` on the table at the top of the stack. Nil for a
+    /// missing key, which — like `stringList` — has to leave the default alone.
+    private static func number(_ state: OpaquePointer, field: String) -> Double? {
+        lua_getfield(state, -1, field)
+        defer { lua_settop(state, -2) }
+        guard lua_type(state, -1) == LUA_TNUMBER else { return nil }
+        return lua_tonumberx(state, -1, nil)
+    }
+
+    private static func boolean(_ state: OpaquePointer, field: String) -> Bool? {
+        lua_getfield(state, -1, field)
+        defer { lua_settop(state, -2) }
+        guard lua_type(state, -1) == LUA_TBOOLEAN else { return nil }
+        return lua_toboolean(state, -1) != 0
     }
 
     /// The array under `field` on the table at the top of the stack, or nil when the
@@ -354,6 +411,13 @@ final class LuaRuntime: @unchecked Sendable {
         let symbol = field("symbol") ?? ""
         let iconPath = field("icon") ?? ""
         let aliases = list("aliases")
+        func flag(_ name: String) -> Bool {
+            lua_getfield(state, -1, name)
+            defer { lua_settop(state, -2) }
+            return lua_type(state, -1) == LUA_TBOOLEAN && lua_toboolean(state, -1) != 0
+        }
+        let keep = flag("keep")
+        let hidden = flag("hidden")
         let provider = field("provider")
         let shell = field("shell")
         let appleScript = field("applescript")
@@ -384,7 +448,9 @@ final class LuaRuntime: @unchecked Sendable {
             provider: provider,
             actionReference: actionReference,
             scriptAction: scriptAction,
-            order: order
+            order: order,
+            keep: keep,
+            hidden: hidden
         )
     }
 
