@@ -39,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.backRow = settings.back
             menu.search = settings.search
             menu.providerLimits = settings.providers
+            menu.commands.spec = settings.commands
             usage.spec = settings.ranking
             panel.shortcuts = settings.shortcuts
             appIndex.apply(scan: settings.apps)

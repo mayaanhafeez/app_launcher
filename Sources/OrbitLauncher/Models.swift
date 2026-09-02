@@ -70,6 +70,9 @@ struct MenuNode: Sendable {
     /// Extra route names for `orbitctl show <alias>`; also searchable.
     var aliases: [String] = []
     let provider: String?
+    /// A shell command whose stdout becomes rows while this submenu is open. Like
+    /// `provider`, it belongs to the menu that declares it, and may contain `{query}`.
+    var command: String = ""
     let actionReference: Int32?
     let scriptAction: ScriptAction?
     let order: Int
@@ -232,6 +235,30 @@ struct SearchSpec: Sendable, Equatable {
     var matchDetail = true
 }
 
+/// How `command = "..."` rows are run, from `commands = { ... }` in config.lua.
+/// Deliberately stricter than the Lua provider budget: this spawns a real process
+/// while the user is typing.
+struct CommandSpec: Sendable, Equatable {
+    /// Wall-clock deadline before the process is killed. Generous next to a Lua
+    /// provider's 0.15s, because a subprocess has to start before it can answer.
+    var timeout: TimeInterval = 2
+    /// Quiet period before a keystroke spawns anything. Non-zero by default, unlike
+    /// the Lua provider debounce — spawning `brew search` on every keystroke is
+    /// exactly the behaviour this feature has to avoid.
+    var debounce: TimeInterval = 0.15
+    var maxRows = 200
+    /// Ceiling on captured stdout. A command that prints without stopping is bounded
+    /// by this rather than by the deadline alone.
+    var maxBytes = 1 << 20
+    /// How many query results to remember, so backspacing does not respawn.
+    var cacheSize = 32
+    var shell = "/bin/sh"
+    /// Run the shell as a login shell, sourcing the user's profile. Off by default:
+    /// it is slower and inherits whatever that profile does. Turn it on when a
+    /// command needs a PATH the launcher cannot guess.
+    var login = false
+}
+
 /// Execution limits for Lua providers, from `providers = { ... }` in config.lua.
 struct ProviderSpec: Sendable, Equatable {
     /// Wall-clock deadline for one provider call.
@@ -248,6 +275,7 @@ struct Settings: Sendable {
     var ranking = RankingSpec()
     var search = SearchSpec()
     var providers = ProviderSpec()
+    var commands = CommandSpec()
     /// Quiet period after a config-directory event before reloading.
     var watchDebounce: TimeInterval = 0.08
     /// Modal navigation, off unless `vim = true` in config.lua.

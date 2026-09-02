@@ -79,3 +79,45 @@ import Testing
     #expect(FuzzyMatcher.score("ethernet", in: node.searchText(includingDetail: true)) != nil)
     #expect(FuzzyMatcher.score("ethernet", in: node.searchText(includingDetail: false)) == nil)
 }
+
+@Test func commandFieldAndBlockDecode() async {
+    let (runtime, load, directory) = await orbitLoadConfig("""
+    return {
+      commands = { timeout = 4, debounce = 0.3, max_rows = 12, max_bytes = 2048,
+                   cache_size = 4, shell = "/bin/zsh", login = true },
+      items = {
+        { id = "root", label = "Go" },
+        { id = "brew", label = "Brew", command = "brew search {query}" },
+        { id = "plain", label = "Plain" },
+      },
+    }
+    """)
+    defer { orbitRemove(directory); _ = runtime }
+
+    #expect(load.node("brew")?.command == "brew search {query}")
+    // A node with only a command is still a submenu: it has nothing to activate.
+    #expect(load.node("brew")?.kind == .menu)
+    #expect(load.node("plain")?.command == "")
+
+    #expect(load.settings?.commands.timeout == 4)
+    #expect(load.settings?.commands.debounce == 0.3)
+    #expect(load.settings?.commands.maxRows == 12)
+    #expect(load.settings?.commands.maxBytes == 2048)
+    #expect(load.settings?.commands.cacheSize == 4)
+    #expect(load.settings?.commands.shell == "/bin/zsh")
+    #expect(load.settings?.commands.login == true)
+}
+
+@Test func commandDefaultsAreConservative() async {
+    let (runtime, load, directory) = await orbitLoadConfig("""
+    return { items = { { id = "root", label = "Go" } } }
+    """)
+    defer { orbitRemove(directory); _ = runtime }
+
+    // Non-zero by default, unlike the Lua provider debounce: spawning a process on
+    // every keystroke is the thing this feature has to avoid.
+    #expect(load.settings?.commands.debounce == 0.15)
+    #expect(load.settings?.commands.timeout == 2)
+    #expect(load.settings?.commands.login == false)
+    #expect(load.settings?.commands.shell == "/bin/sh")
+}
