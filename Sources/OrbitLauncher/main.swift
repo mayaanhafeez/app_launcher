@@ -6,7 +6,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let appIndex = AppIndex()
     private let runtime = LuaRuntime()
     private let themeRuntime = ThemeRuntime()
-    private lazy var menu = MenuController(appIndex: appIndex, runtime: runtime)
+    private let usage = UsageStore(url: UsageStore.defaultURL)
+    private lazy var menu = MenuController(appIndex: appIndex, runtime: runtime, usage: usage)
     private let panel = PanelController()
     private var hotKey: GlobalHotKey?
     private var watcher: ConfigWatcher?
@@ -36,8 +37,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             panel.vimEnabled = settings.vimMode
             menu.backRow = settings.back
+            menu.search = settings.search
+            menu.providerLimits = settings.providers
+            usage.spec = settings.ranking
             panel.shortcuts = settings.shortcuts
             appIndex.apply(scan: settings.apps)
+            watcher?.setDebounce(settings.watchDebounce)
+            themePointerWatcher?.setDebounce(settings.watchDebounce)
             if appliedLoginItem != settings.loginItem {
                 appliedLoginItem = settings.loginItem
                 setLoginItem(settings.loginItem)
@@ -56,7 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func reloadAll() {
         runtime.load(file: configDirectory.appendingPathComponent("config.lua"))
-        panel.apply(theme: themeRuntime.load(file: configDirectory.appendingPathComponent("theme.lua")))
+        reloadTheme()
     }
 
     private func startWatcher() {
@@ -76,7 +82,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func reloadTheme() {
-        panel.apply(theme: themeRuntime.load(file: configDirectory.appendingPathComponent("theme.lua")))
+        let theme = themeRuntime.load(file: configDirectory.appendingPathComponent("theme.lua"))
+        panel.apply(theme: theme)
+        // Icons are flattened at scan time, so the index needs the size the panel is
+        // about to draw them at; `apply` no-ops unless it actually changed.
+        appIndex.apply(iconPoints: theme.iconSlot)
     }
 
     private func reloadChangedFiles() {
@@ -135,7 +145,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             reload: { [weak self] in self?.reloadAll() },
             paletteName: { [weak self] in self?.themeRuntime.paletteName ?? "" },
             version: { Self.bundleVersion },
-            invoke: { [weak self] id in self?.menu.invoke(id: id) ?? false }
+            invoke: { [weak self] id in self?.menu.invoke(id: id) ?? false },
+            list: { [weak self] route, query in self?.menu.rows(route: route, query: query) }
         ).handle(request)
     }
 

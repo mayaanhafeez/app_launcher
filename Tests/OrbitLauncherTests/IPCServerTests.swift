@@ -188,3 +188,67 @@ private func startIPCServer(_ recorder: CommandRecorder) throws -> (server: IPCS
 
     #expect(await ipcSend("ping", to: url.path)?.message == "ok")
 }
+
+/// Reads to EOF the way `orbitctl` now does. The single-read client above is fine
+/// for the short verbs, but a `list` reply is tens of kilobytes and neither one
+/// `write` nor one `read` is guaranteed to carry it.
+private func ipcSendLargeRaw(_ payload: Data, to path: String) -> Data {
+    let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
+    guard descriptor >= 0 else { return Data() }
+    defer { close(descriptor) }
+    var timeout = timeval(tv_sec: 5, tv_usec: 0)
+    setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+
+    var address = sockaddr_un()
+    address.sun_family = sa_family_t(AF_UNIX)
+    let bytes = path.utf8CString
+    guard bytes.count <= MemoryLayout.size(ofValue: address.sun_path) else { return Data() }
+    withUnsafeMutablePointer(to: &address.sun_path) { pointer in
+        pointer.withMemoryRebound(to: CChar.self, capacity: bytes.count) { destination in
+            _ = bytes.withUnsafeBufferPointer { strcpy(destination, $0.baseAddress!) }
+        }
+    }
+    let connected = withUnsafePointer(to: &address) { pointer in
+        pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(descriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+    }
+    guard connected == 0 else { return Data() }
+    payload.withUnsafeBytes { _ = write(descriptor, $0.baseAddress, payload.count) }
+
+    var received = Data()
+    var buffer = [UInt8](repeating: 0, count: 16_384)
+    while true {
+        let count = read(descriptor, &buffer, buffer.count)
+        if count > 0 { received.append(contentsOf: buffer.prefix(count)) } else { break }
+    }
+    return received
+}
+
+@MainActor
+@Test func ipcDeliversRepliesLargerThanOneBuffer() async throws {
+    let directory = orbitTemporaryDirectory("orbit-ipc-big")
+    let server = IPCServer(socketURL: directory.appendingPathComponent("orbit.sock"))
+    // 800 rows is the shape of `list apps` on a real machine, and comfortably past
+    // both the socket buffer and the 4096 bytes the old client read.
+    let rows = (0..<800).map {
+        DisplayRow(id: "app:/Applications/App\($0).app", kind: .app, label: "Application \($0)",
+                   detail: "/Applications/App\($0).app", symbol: "", image: nil, score: $0, section: "apps")
+    }
+    server.handler = { request in
+        IPCCommands(list: { _, _ in (title: "Apps", rows: rows) }).handle(request)
+    }
+    try server.start()
+    defer { orbitRemove(directory); _ = server }
+
+    let payload = try JSONEncoder().encode(IPCRequest(command: "list", argument: "apps"))
+    let raw = await withCheckedContinuation { continuation in
+        DispatchQueue.global().async { continuation.resume(returning: ipcSendLargeRaw(payload, to: server.socketURL.path)) }
+    }
+    #expect(raw.count > 4096)
+
+    let response = try? JSONDecoder().decode(IPCResponse.self, from: raw)
+    #expect(response?.ok == true)
+    let listing = try? JSONDecoder().decode(ListingPayload.self, from: Data(response?.message.utf8 ?? "".utf8))
+    // Every row arrives, not just the first bufferful.
+    #expect(listing?.rows.count == 800)
+    #expect(listing?.rows.last?.label == "Application 799")
+}

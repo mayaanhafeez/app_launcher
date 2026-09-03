@@ -8,10 +8,16 @@
 --   detail        subtitle            symbol   SF Symbol name
 --   icon          image file path     aliases  extra route names, also searchable
 --   provider      name of a function in `providers` that supplies rows at query time
+--   keep          skip the fuzzy filter; the row stays visible whatever is typed
+--   hidden        never listed, but still reachable by search, alias and `invoke`
 --   shell | applescript | open | url | action(query)
 --
 -- Any of shell/applescript/open/url may contain {query}, replaced by what is typed
 -- and escaped for its destination. `action` handlers receive it as an argument.
+--
+-- `keep = true` is what makes {query} usable on a static item: an ordinary row goes
+-- through the fuzzy filter, so typing the argument would remove the very row meant
+-- to consume it. Kept rows sort below the search results.
 
 local function item(id, label, fields)
   fields = fields or {}
@@ -177,6 +183,25 @@ return {
   -- opt into. It can also be toggled from the menu bar, and this value wins the
   -- next time the config is saved. Only works from the built .app bundle.
   login_item = false,
+
+  -- Frecency. Rows you activate often, and recently, rank higher in *search*
+  -- results; the order you wrote below is never rearranged. `ranking = false`
+  -- switches it off. `half_life` is in seconds, `weight` is the ceiling on the
+  -- discount in fuzzy-score units.
+  ranking = { enabled = true, half_life = 14 * 24 * 3600, weight = 12 },
+
+  -- Result limits. `app_limit` caps the app rows merged into a search, `row_limit`
+  -- caps the whole list (0 = no cap), `depth` is how far a drilldown search walks,
+  -- and `match_detail` decides whether the subtitle is searchable too.
+  search = { app_limit = 40, row_limit = 0, depth = 32, match_detail = true },
+
+  -- Budget for Lua providers. `debounce` is a quiet period before a keystroke runs
+  -- the provider; 0 fires on every keystroke. Named `provider_limits` rather than
+  -- `providers`, which already holds the provider functions themselves.
+  provider_limits = { timeout = 0.15, instructions = 1000000, debounce = 0 },
+
+  -- Quiet period after a config-file change before reloading.
+  watch = { debounce = 0.08 },
 
   items = items,
   providers = providers,

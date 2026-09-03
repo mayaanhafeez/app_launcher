@@ -4,7 +4,11 @@ import AppKit
 final class MenuController {
     let appIndex: AppIndex
     let runtime: LuaRuntime
+    let usage: UsageStore
     var nodes: [MenuNode] = []
+    /// Republished on every config reload, like `backRow`.
+    var search = SearchSpec()
+    var providerLimits = ProviderSpec()
     private var activeMenu = "root"
     private var navigation: [String] = []
     private var providerGeneration = 0
@@ -21,9 +25,12 @@ final class MenuController {
     var onNotice: ((String) -> Void)?
     var onDismiss: (() -> Void)?
 
-    init(appIndex: AppIndex, runtime: LuaRuntime) {
+    /// `usage` defaults to a memory-only store so a test — or any caller that does not
+    /// opt in — can never read or write the real usage file.
+    init(appIndex: AppIndex, runtime: LuaRuntime, usage: UsageStore = UsageStore(url: nil)) {
         self.appIndex = appIndex
         self.runtime = runtime
+        self.usage = usage
         runtime.onReload = { [weak self] result in
             switch result {
             case .success(let nodes):
@@ -45,6 +52,9 @@ final class MenuController {
     func update(query: String) { refresh(query: query) }
 
     func activate(_ row: DisplayRow) {
+        // Recorded before dispatch, and for every kind but the synthetic back row:
+        // navigating out of a submenu is not a use of anything.
+        if row.kind != .back { usage.record(row.id) }
         if row.kind == .back {
             // Only reachable inside a submenu, but a back that finds nothing to pop
             // means the same thing here as Escape at root does.
@@ -58,7 +68,7 @@ final class MenuController {
         }
         // Provider rows have no backing node; they carry their action inline.
         if let action = row.action {
-            runtime.invoke(scriptAction: action, query: query)
+            guard dispatch(action) else { return }
             onDismiss?()
             return
         }
@@ -71,9 +81,22 @@ final class MenuController {
             runtime.invoke(reference: reference, query: query)
             onDismiss?()
         } else if let scriptAction = node.scriptAction {
-            runtime.invoke(scriptAction: scriptAction, query: query)
+            guard dispatch(scriptAction) else { return }
             onDismiss?()
         }
+    }
+
+    /// Runs an action, or refuses it. A `{query}` row is now reachable with nothing
+    /// typed — `keep` is what put it there — and substituting an empty string would
+    /// run `brew install ''` rather than doing nothing. Returns whether it dispatched,
+    /// so the caller knows not to dismiss a panel the user still has to type into.
+    private func dispatch(_ action: ScriptAction) -> Bool {
+        guard !(action.wantsQuery && query.isBlank) else {
+            onNotice?("Type something first")
+            return false
+        }
+        runtime.invoke(scriptAction: action, query: query)
+        return true
     }
 
     func back() -> Bool {
@@ -89,6 +112,18 @@ final class MenuController {
         else if let scriptAction = node.scriptAction { runtime.invoke(scriptAction: scriptAction) }
         else { return false }
         return true
+    }
+
+    /// The rows a route would show, without disturbing the panel's own active menu,
+    /// query or navigation stack. This is what `orbitctl list` reports, and what lets
+    /// the search, sort, drilldown and back-row rules be asserted without a window.
+    ///
+    /// Provider rows are absent by design: a provider is asynchronous, and this is a
+    /// synchronous snapshot of the static list.
+    func rows(route: String, query: String) -> (title: String, rows: [DisplayRow]) {
+        let menu = resolve(route)
+        let built = build(menu: menu, query: query.trimmingCharacters(in: .whitespacesAndNewlines))
+        return (built.title, decorated(built.rows, menu: menu))
     }
 
     /// An exact id wins over any alias, matching how routes resolve in `orbitctl`.
@@ -113,33 +148,53 @@ final class MenuController {
         return image
     }
 
-    private func refresh(query: String) {
-        self.query = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmed = self.query
-        let activeNode = nodes.first(where: { $0.id == activeMenu })
-        let title = activeNode?.headerTitle ?? "Go"
+    /// The static rows for `menu` under `query`. Pure with respect to navigation: it
+    /// reads `activeMenu` nowhere, which is what lets `rows(route:query:)` answer for
+    /// any route without disturbing what the panel is showing.
+    private func build(menu: String, query: String) -> (title: String, rows: [DisplayRow]) {
+        let menuNode = nodes.first(where: { $0.id == menu })
+        let title = menuNode?.headerTitle ?? "Go"
         var rows: [DisplayRow] = []
-        if activeMenu == "apps" {
-            rows.append(contentsOf: appIndex.results(for: trimmed, limit: trimmed.isEmpty ? appIndex.entries.count : 40))
-        } else if activeMenu == "root" && !trimmed.isEmpty {
-            rows.append(contentsOf: appIndex.results(for: trimmed, limit: 40))
+        // Frecency has to be applied *inside* the app search, not after it: the index
+        // sorts and truncates to the limit itself, so a discount applied to the result
+        // could not rescue an app that had already been cut.
+        let appBonus: (String) -> Int = { [usage] path in usage.bonus(for: "app:\(path)") }
+        if menu == "apps" {
+            rows.append(contentsOf: appIndex.results(for: query, limit: query.isEmpty ? appIndex.entries.count : search.appLimit, bonus: appBonus))
+        } else if menu == "root" && !query.isEmpty {
+            rows.append(contentsOf: appIndex.results(for: query, limit: search.appLimit, bonus: appBonus))
         }
         let candidates = nodes.filter { node in
-            if trimmed.isEmpty { return node.parent == activeMenu }
-            return node.id != "root" && isDescendant(node, of: activeMenu)
+            guard node.id != "root" else { return false }
+            // `hidden` drops a node from the listing only. It stays searchable here,
+            // and `node(matching:)` still resolves it for aliases and `invoke`.
+            if query.isEmpty { return node.parent == menu && !node.hidden }
+            return isDescendant(node, of: menu)
         }
-        rows.append(contentsOf: candidates.compactMap { node in
-            let score = trimmed.isEmpty ? node.order : FuzzyMatcher.score(trimmed, in: node.searchText)
-            guard let score else { return nil }
-            return DisplayRow(id: node.id, kind: node.kind, label: node.label, detail: trimmed.isEmpty ? node.detail : path(for: node), symbol: node.symbol, image: icon(for: node), score: score, section: node.parent == activeMenu ? "current" : "drilldown")
+        rows.append(contentsOf: candidates.compactMap { node -> DisplayRow? in
+            // A closure rather than a nested function: a nested `func` does not inherit
+            // the enclosing actor isolation, so it cannot call `icon(for:)`.
+            let image = icon(for: node)
+            let row = { (score: Int, detail: String, section: String) -> DisplayRow in
+                DisplayRow(id: node.id, kind: node.kind, label: node.label, detail: detail,
+                           symbol: node.symbol, image: image, score: score, section: section)
+            }
+            if query.isEmpty { return row(node.order, node.detail, "current") }
+            // A `keep` row skips the filter entirely and keeps its own detail: it exists
+            // to consume what was typed, so the breadcrumb a search hit would get is
+            // noise on it.
+            if node.keep { return row(node.order, node.detail, "keep") }
+            guard let base = FuzzyMatcher.score(query, in: node.searchText(includingDetail: search.matchDetail)) else { return nil }
+            return row(base - usage.bonus(for: node.id), path(for: node),
+                       node.parent == menu ? "current" : "drilldown")
         })
-        if trimmed.isEmpty {
-            rows.sort { activeMenu == "apps" ? $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending : $0.score < $1.score }
+        if query.isEmpty {
+            rows.sort { menu == "apps" ? $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending : $0.score < $1.score }
         } else {
             rows.sort {
-                let lhsSection = $0.section == "current" ? 0 : 1
-                let rhsSection = $1.section == "current" ? 0 : 1
-                if lhsSection != rhsSection { return lhsSection < rhsSection }
+                let lhs = Self.sectionRank($0.section)
+                let rhs = Self.sectionRank($1.section)
+                if lhs != rhs { return lhs < rhs }
                 return $0.score == $1.score ? $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending : $0.score < $1.score
             }
             if let split = rows.firstIndex(where: { $0.section != "current" }), split > 0 {
@@ -148,23 +203,56 @@ final class MenuController {
                 rows[split] = row
             }
         }
-        let baseRows = rows
-        onRows?(title, decorated(baseRows))
+        if search.rowLimit > 0 { rows = Array(rows.prefix(search.rowLimit)) }
+        return (title, rows)
+    }
+
+    /// Direct children first, then everything found by drilling down, then the rows
+    /// that survive the filter on purpose. `keep` sorting last is what leaves it below
+    /// the search results and — since provider rows are appended after this list — above
+    /// the provider rows, which is the order the back row's `position = "bottom"` assumes.
+    private static func sectionRank(_ section: String) -> Int {
+        switch section {
+        case "current": return 0
+        case "keep": return 2
+        default: return 1
+        }
+    }
+
+    private func refresh(query: String) {
+        self.query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = self.query
+        let menu = activeMenu
+        let built = build(menu: menu, query: trimmed)
+        let baseRows = built.rows
+        let title = built.title
+        onRows?(title, decorated(baseRows, menu: menu))
 
         // A provider belongs to the submenu that declares it and supplies that
         // submenu's rows while it is open — entering `search` is what runs `search`'s
         // provider, not merely seeing it listed one level up.
         providerGeneration += 1
         let generation = providerGeneration
-        guard let name = activeNode?.provider else { return }
-        runtime.provider(name: name, menuID: activeMenu, query: trimmed) { [weak self] result in
-            DispatchQueue.main.async {
-                guard let self, generation == self.providerGeneration else { return }
-                switch result {
-                case .success(let providerRows): self.onRows?(title, self.decorated(baseRows + providerRows))
-                case .failure(let error): self.onNotice?(error.localizedDescription)
+        guard let name = nodes.first(where: { $0.id == menu })?.provider else { return }
+        let dispatch: @MainActor @Sendable () -> Void = { [weak self] in
+            guard let self, generation == self.providerGeneration else { return }
+            runtime.provider(name: name, menuID: menu, query: trimmed, timeout: providerLimits.timeout, instructions: providerLimits.instructions) { [weak self] result in
+                DispatchQueue.main.async {
+                    guard let self, generation == self.providerGeneration else { return }
+                    switch result {
+                    case .success(let providerRows): self.onRows?(title, self.decorated(baseRows + providerRows, menu: menu))
+                    case .failure(let error): self.onNotice?(error.localizedDescription)
+                    }
                 }
             }
+        }
+        // The generation check inside `dispatch` is what makes the debounce a debounce:
+        // a later keystroke bumps the generation and the pending call returns without
+        // spawning a state.
+        if providerLimits.debounce > 0 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + providerLimits.debounce, execute: dispatch)
+        } else {
+            dispatch()
         }
     }
 
@@ -173,8 +261,8 @@ final class MenuController {
     /// keystroke would drop the one row that is meant to survive every query. Adding
     /// it here also keeps `position = "bottom"` below the provider rows, which arrive
     /// after the base list.
-    private func decorated(_ rows: [DisplayRow]) -> [DisplayRow] {
-        guard backRow.enabled, activeMenu != "root" else { return rows }
+    private func decorated(_ rows: [DisplayRow], menu: String) -> [DisplayRow] {
+        guard backRow.enabled, menu != "root" else { return rows }
         let row = DisplayRow(id: "orbit.back", kind: .back, label: backRow.label, detail: backRow.detail,
                              symbol: backRow.symbol, image: nil, score: -1, section: "back")
         return backRow.atTop ? [row] + rows : rows + [row]
@@ -183,7 +271,7 @@ final class MenuController {
     private func isDescendant(_ node: MenuNode, of ancestor: String) -> Bool {
         if ancestor == "root" { return true }
         var parent = node.parent
-        for _ in 0..<32 {
+        for _ in 0..<search.depth {
             if parent == ancestor { return true }
             guard let next = nodes.first(where: { $0.id == parent }) else { return false }
             parent = next.parent
@@ -194,7 +282,7 @@ final class MenuController {
     private func path(for node: MenuNode) -> String {
         var labels: [String] = []
         var current: MenuNode? = node
-        for _ in 0..<32 {
+        for _ in 0..<search.depth {
             guard let item = current, item.id != "root" else { break }
             labels.insert(item.label, at: 0)
             current = nodes.first(where: { $0.id == item.parent })

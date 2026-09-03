@@ -4,6 +4,13 @@ import Foundation
 // Shared scaffolding for the tests that touch the filesystem, the Lua queue or a
 // socket. Everything here is hermetic and bounded: no test may read the real
 // `~/.config/orbit`, bind the real container socket, or wait without a deadline.
+//
+// The same rule covers actions. `MenuController.activate` really dispatches, and
+// `LuaRuntime.invoke` really drives Terminal through `osascript` — a test node
+// carrying `shell = "brew install ..."` will install it. Give test nodes `.url("")`,
+// or `.url("{query}")` where the action has to want a query: `invoke` guards every
+// case on `!isBlank`, and a resolved query has no URL scheme for `NSWorkspace` to
+// open, so neither one can launch anything.
 
 /// A directory under `/tmp`, not `NSTemporaryDirectory()`: a `sockaddr_un` path is
 /// capped at 104 bytes and the per-user temp directory alone eats most of that, so
