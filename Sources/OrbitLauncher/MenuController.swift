@@ -5,7 +5,12 @@ final class MenuController {
     let appIndex: AppIndex
     let runtime: LuaRuntime
     let usage: UsageStore
+    let commands = CommandRunner()
     var nodes: [MenuNode] = []
+    /// Async rows for the current generation, held so that whichever source answers
+    /// second can repaint the list without discarding what the first one returned.
+    private var providerRows: [DisplayRow] = []
+    private var commandRows: [DisplayRow] = []
     /// Republished on every config reload, like `backRow`.
     var search = SearchSpec()
     var providerLimits = ProviderSpec()
@@ -22,6 +27,7 @@ final class MenuController {
         }
     }
     var onRows: ((String, [DisplayRow]) -> Void)?
+    var onQuery: ((String) -> Void)?
     var onNotice: ((String) -> Void)?
     var onDismiss: (() -> Void)?
 
@@ -35,6 +41,9 @@ final class MenuController {
             switch result {
             case .success(let nodes):
                 self?.iconCache = [:]
+                // A reload can change what a command *is*, so its answers for the old
+                // one are no longer about anything.
+                self?.commands.clearCache()
                 self?.nodes = nodes
                 self?.refresh(query: "")
             case .failure(let error): self?.onNotice?(error.localizedDescription)
@@ -46,6 +55,7 @@ final class MenuController {
     func open(route: String = "root") {
         activeMenu = resolve(route)
         navigation = []
+        onQuery?("")
         refresh(query: "")
     }
 
@@ -76,6 +86,7 @@ final class MenuController {
         if node.kind == .menu {
             navigation.append(activeMenu)
             activeMenu = node.id
+            onQuery?("")
             refresh(query: "")
         } else if let reference = node.actionReference {
             runtime.invoke(reference: reference, query: query)
@@ -102,6 +113,7 @@ final class MenuController {
     func back() -> Bool {
         guard activeMenu != "root" else { return false }
         activeMenu = navigation.popLast() ?? nodes.first(where: { $0.id == activeMenu })?.parent ?? "root"
+        onQuery?("")
         refresh(query: "")
         return true
     }
@@ -228,31 +240,56 @@ final class MenuController {
         let title = built.title
         onRows?(title, decorated(baseRows, menu: menu))
 
-        // A provider belongs to the submenu that declares it and supplies that
-        // submenu's rows while it is open — entering `search` is what runs `search`'s
-        // provider, not merely seeing it listed one level up.
+        // A provider and a command both belong to the submenu that declares them and
+        // supply that submenu's rows while it is open — entering `search` is what runs
+        // `search`'s provider, not merely seeing it listed one level up.
         providerGeneration += 1
         let generation = providerGeneration
-        guard let name = nodes.first(where: { $0.id == menu })?.provider else { return }
-        let dispatch: @MainActor @Sendable () -> Void = { [weak self] in
+        providerRows = []
+        commandRows = []
+        let node = nodes.first(where: { $0.id == menu })
+
+        // Both sources are asynchronous and either may answer first, so each stores
+        // its own rows and re-emits the union rather than the base plus itself.
+        let emit: @MainActor () -> Void = { [weak self] in
             guard let self, generation == self.providerGeneration else { return }
-            runtime.provider(name: name, menuID: menu, query: trimmed, timeout: providerLimits.timeout, instructions: providerLimits.instructions) { [weak self] result in
-                DispatchQueue.main.async {
-                    guard let self, generation == self.providerGeneration else { return }
-                    switch result {
-                    case .success(let providerRows): self.onRows?(title, self.decorated(baseRows + providerRows, menu: menu))
-                    case .failure(let error): self.onNotice?(error.localizedDescription)
+            self.onRows?(title, self.decorated(baseRows + self.providerRows + self.commandRows, menu: menu))
+        }
+
+        if let name = node?.provider {
+            let dispatch: @MainActor @Sendable () -> Void = { [weak self] in
+                guard let self, generation == self.providerGeneration else { return }
+                runtime.provider(name: name, menuID: menu, query: trimmed, timeout: providerLimits.timeout, instructions: providerLimits.instructions) { [weak self] result in
+                    DispatchQueue.main.async {
+                        guard let self, generation == self.providerGeneration else { return }
+                        switch result {
+                        case .success(let rows):
+                            self.providerRows = rows
+                            emit()
+                        case .failure(let error): self.onNotice?(error.localizedDescription)
+                        }
                     }
                 }
             }
+            // The generation check inside `dispatch` is what makes the debounce a
+            // debounce: a later keystroke bumps the generation and the pending call
+            // returns without spawning a state.
+            if providerLimits.debounce > 0 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + providerLimits.debounce, execute: dispatch)
+            } else {
+                dispatch()
+            }
         }
-        // The generation check inside `dispatch` is what makes the debounce a debounce:
-        // a later keystroke bumps the generation and the pending call returns without
-        // spawning a state.
-        if providerLimits.debounce > 0 {
-            DispatchQueue.main.asyncAfter(deadline: .now() + providerLimits.debounce, execute: dispatch)
+
+        if let command = node?.command, !command.isBlank {
+            commands.rows(command: command, menuID: menu, query: trimmed) { [weak self] rows in
+                guard let self, generation == self.providerGeneration else { return }
+                self.commandRows = rows
+                emit()
+            }
         } else {
-            dispatch()
+            // Navigating away from a command menu has to kill whatever it started.
+            commands.cancel()
         }
     }
 

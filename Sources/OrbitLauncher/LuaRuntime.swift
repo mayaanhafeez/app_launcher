@@ -334,6 +334,20 @@ final class LuaRuntime: @unchecked Sendable {
         }
         lua_settop(state, -2)
 
+        lua_getfield(state, -1, "commands")
+        if lua_type(state, -1) == LUA_TTABLE {
+            if let value = number(state, field: "timeout"), value > 0 { settings.commands.timeout = value }
+            if let value = number(state, field: "debounce"), value >= 0 { settings.commands.debounce = value }
+            if let value = number(state, field: "max_rows") { settings.commands.maxRows = max(1, Int(value)) }
+            if let value = number(state, field: "max_bytes") { settings.commands.maxBytes = max(1024, Int(value)) }
+            if let value = number(state, field: "cache_size") { settings.commands.cacheSize = max(0, Int(value)) }
+            lua_getfield(state, -1, "shell")
+            if let shell = luaString(state, -1), !shell.isEmpty { settings.commands.shell = shell }
+            lua_settop(state, -2)
+            if let value = boolean(state, field: "login") { settings.commands.login = value }
+        }
+        lua_settop(state, -2)
+
         lua_getfield(state, -1, "watch")
         if lua_type(state, -1) == LUA_TTABLE {
             if let value = number(state, field: "debounce"), value >= 0 { settings.watchDebounce = value }
@@ -419,6 +433,7 @@ final class LuaRuntime: @unchecked Sendable {
         let keep = flag("keep")
         let hidden = flag("hidden")
         let provider = field("provider")
+        let command = field("command") ?? ""
         let shell = field("shell")
         let appleScript = field("applescript")
         let open = field("open")
@@ -446,6 +461,7 @@ final class LuaRuntime: @unchecked Sendable {
             iconPath: iconPath,
             aliases: aliases,
             provider: provider,
+            command: command,
             actionReference: actionReference,
             scriptAction: scriptAction,
             order: order,

@@ -32,6 +32,31 @@ import Testing
 }
 
 @MainActor
+@Test func enteringAndLeavingMenusClearTheVisibleQuery() {
+    let controller = MenuController(appIndex: AppIndex(), runtime: LuaRuntime())
+    controller.nodes = [
+        MenuNode(id: "root", parent: "", kind: .menu, label: "Go", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: nil, order: 0),
+        MenuNode(id: "colours", parent: "root", kind: .menu, label: "Colour schemes", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: nil, order: 1),
+        MenuNode(id: "colours.nord", parent: "colours", kind: .action, label: "Nord", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: .url(""), order: 2),
+    ]
+    var queryChanges: [String] = []
+    var labels: [String] = []
+    controller.onQuery = { queryChanges.append($0) }
+    controller.onRows = { _, rows in labels = rows.map(\.label) }
+
+    controller.open()
+    controller.update(query: "colour")
+    controller.activate(DisplayRow(id: "colours", kind: .menu, label: "Colour schemes", detail: "", symbol: "", image: nil, score: 0, section: "current"))
+    #expect(queryChanges.last == "")
+    #expect(labels == ["Back", "Nord"])
+
+    controller.update(query: "nord")
+    #expect(controller.back())
+    #expect(queryChanges.last == "")
+    #expect(labels == ["Colour schemes"])
+}
+
+@MainActor
 @Test func providerRowsAreActivatable() {
     let controller = MenuController(appIndex: AppIndex(), runtime: LuaRuntime())
     controller.nodes = [

@@ -8,6 +8,7 @@
 --   detail        subtitle            symbol   SF Symbol name
 --   icon          image file path     aliases  extra route names, also searchable
 --   provider      name of a function in `providers` that supplies rows at query time
+--   command       shell command whose stdout becomes rows while this menu is open
 --   keep          skip the fuzzy filter; the row stays visible whatever is typed
 --   hidden        never listed, but still reachable by search, alias and `invoke`
 --   shell | applescript | open | url | action(query)
@@ -86,6 +87,18 @@ local items = {
   item("setup.theme", "Orbit Theme", { shell = "${EDITOR:-nano} ~/.config/orbit/theme.lua" }),
 
   item("search", "Search", { symbol = "magnifyingglass", provider = "websearch", detail = "Type, then pick a destination" }),
+
+  -- `command` rows come from a subprocess, which is the one thing a Lua provider
+  -- cannot do: a provider runs in a sandbox with no `io` and no execution globals,
+  -- so it can only compute from the query. Output is one row per line, either
+  -- tab-separated `label<TAB>detail<TAB>shell-to-run`, or a JSON object per line
+  -- with label/detail/symbol/value plus shell/url/open/applescript.
+  --
+  -- It runs while you type, so it must be a *read-only* query. Uncomment to try it:
+  --
+  -- item("brew", "Brew Search", { symbol = "shippingbox", detail = "Search Homebrew",
+  --   command = "brew search --formula {query} | head -50 | " ..
+  --             "awk '{ printf \"%s\\tformula\\tbrew install %s\\n\", $1, $1 }'" }),
 
   item("install.formula", "Homebrew Formula", { shell = "read -r '?Formula: ' name; [[ -n $name ]] && brew install --formula $name" }),
   item("install.cask", "Homebrew App", { shell = "read -r '?Cask: ' name; [[ -n $name ]] && brew install --cask $name" }),
@@ -199,6 +212,23 @@ return {
   -- the provider; 0 fires on every keystroke. Named `provider_limits` rather than
   -- `providers`, which already holds the provider functions themselves.
   provider_limits = { timeout = 0.15, instructions = 1000000, debounce = 0 },
+
+  -- Budget for `command = "..."` rows. Stricter than the Lua one, because this
+  -- spawns a real process while you type: `debounce` is a quiet period before
+  -- anything is spawned, `timeout` kills what overstays, and `max_bytes` bounds a
+  -- command that prints without stopping. `login = true` runs the shell as a login
+  -- shell so it picks up your own PATH — slower, but needed if the launcher cannot
+  -- find your tools (a GUI app inherits a minimal PATH from launchd; /opt/homebrew/bin
+  -- and /usr/local/bin are added for you either way).
+  commands = {
+    timeout = 2,
+    debounce = 0.15,
+    max_rows = 200,
+    max_bytes = 1048576,
+    cache_size = 32,
+    shell = "/bin/sh",
+    login = false,
+  },
 
   -- Quiet period after a config-file change before reloading.
   watch = { debounce = 0.08 },
