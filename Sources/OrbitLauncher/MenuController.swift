@@ -27,6 +27,7 @@ final class MenuController {
         }
     }
     var onRows: ((String, [DisplayRow]) -> Void)?
+    var onQuery: ((String) -> Void)?
     var onNotice: ((String) -> Void)?
     var onDismiss: (() -> Void)?
 
@@ -54,6 +55,7 @@ final class MenuController {
     func open(route: String = "root") {
         activeMenu = resolve(route)
         navigation = []
+        onQuery?("")
         refresh(query: "")
     }
 
@@ -84,6 +86,7 @@ final class MenuController {
         if node.kind == .menu {
             navigation.append(activeMenu)
             activeMenu = node.id
+            onQuery?("")
             refresh(query: "")
         } else if let reference = node.actionReference {
             runtime.invoke(reference: reference, query: query)
@@ -110,6 +113,7 @@ final class MenuController {
     func back() -> Bool {
         guard activeMenu != "root" else { return false }
         activeMenu = navigation.popLast() ?? nodes.first(where: { $0.id == activeMenu })?.parent ?? "root"
+        onQuery?("")
         refresh(query: "")
         return true
     }

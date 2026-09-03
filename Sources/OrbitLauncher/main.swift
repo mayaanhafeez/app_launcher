@@ -54,11 +54,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         menu.onRows = { [weak panel] title, rows in panel?.update(title: title, rows: rows) }
+        menu.onQuery = { [weak panel] query in panel?.setQuery(query) }
         menu.onNotice = { [weak panel] message in panel?.showNotice(message) }
-        menu.onDismiss = { [weak panel] in panel?.hide() }
+        menu.onDismiss = { [weak self] in self?.dismiss() }
         panel.onQuery = { [weak menu] query in menu?.update(query: query) }
         panel.onActivate = { [weak menu] row in menu?.activate(row) }
         panel.onBack = { [weak menu] in menu?.back() ?? false }
+        panel.onDismiss = { [weak self] in self?.dismiss() }
     }
 
     private func reloadAll() {
@@ -124,7 +126,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// A fresh install has no `~/.config/orbit` until the templates are copied, and
     /// opening a path that isn't there does nothing at all, so create it first.
     private func openConfigDirectory() {
-        panel.hide()
+        dismiss()
         try? FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true)
         NSWorkspace.shared.open(configDirectory)
     }
@@ -142,7 +144,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         IPCCommands(
             toggle: { [weak self] route in self?.toggle(route: route) },
             show: { [weak self] route in self?.show(route: route) },
-            hide: { [weak self] in self?.panel.hide() },
+            hide: { [weak self] in self?.dismiss() },
             reload: { [weak self] in self?.reloadAll() },
             paletteName: { [weak self] in self?.themeRuntime.paletteName ?? "" },
             version: { Self.bundleVersion },
@@ -160,8 +162,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return "\(short) (\(build))"
     }
 
-    private func toggle(route: String) { panel.window?.isVisible == true ? panel.hide() : show(route: route) }
+    private func toggle(route: String) { panel.window?.isVisible == true ? dismiss() : show(route: route) }
     private func show(route: String) { menu.open(route: route); panel.show(route: route) }
+    private func dismiss() {
+        panel.hide()
+        menu.open()
+    }
 }
 
 let application = NSApplication.shared
