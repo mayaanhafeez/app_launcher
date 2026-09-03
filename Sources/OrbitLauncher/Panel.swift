@@ -36,7 +36,7 @@ final class LauncherTable: NSTableView {
 }
 
 @MainActor
-final class PanelController: NSWindowController, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
+final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
     private let blur = NSVisualEffectView()
     private let card = NSView()
     private let input = LauncherField()
@@ -93,6 +93,7 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
     var onQuery: ((String) -> Void)?
     var onActivate: ((DisplayRow) -> Void)?
     var onBack: (() -> Bool)?
+    var onDismiss: (() -> Void)?
 
     init() {
         let panel = LauncherPanel(contentRect: NSRect(x: 0, y: 0, width: 380, height: 300), styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView], backing: .buffered, defer: false)
@@ -107,6 +108,7 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
         panel.hasShadow = true
         panel.acceptsMouseMovedEvents = true
         super.init(window: panel)
+        panel.delegate = self
         buildUI(panel)
         apply(theme: theme)
         installKeyMonitor()
@@ -153,7 +155,27 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
         panel.makeFirstResponder(input)
     }
 
-    func hide() { window?.orderOut(nil) }
+    func hide() {
+        input.stringValue = ""
+        mode = .normal
+        refreshModeIndicator()
+        updatePrompt()
+        window?.orderOut(nil)
+    }
+
+    func setQuery(_ query: String) {
+        guard input.stringValue != query else { return }
+        input.stringValue = query
+        updatePrompt()
+        if let editor = input.currentEditor() {
+            editor.selectedRange = NSRange(location: (query as NSString).length, length: 0)
+        }
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        guard window?.isVisible == true else { return }
+        onDismiss?()
+    }
 
     func update(title: String, rows: [DisplayRow]) {
         self.title = title
@@ -450,7 +472,7 @@ final class PanelController: NSWindowController, NSTableViewDataSource, NSTableV
 
     private func goBack() -> Bool {
         let handled = onBack?() == true
-        if !handled { hide() }
+        if !handled { onDismiss?() }
         return true
     }
 
