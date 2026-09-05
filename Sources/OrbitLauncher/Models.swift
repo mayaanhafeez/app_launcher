@@ -140,6 +140,20 @@ struct BackRowSpec: Sendable, Equatable {
     var atTop: Bool { position.lowercased() != "bottom" }
 }
 
+/// Clipboard history, from `clipboard = { ... }` in config.lua. **Off by default**:
+/// a launcher that starts recording everything you copy without being asked is not a
+/// good default, and one that writes it to disk unasked is worse.
+struct ClipboardSpec: Sendable, Equatable {
+    var enabled = false
+    /// How many entries to keep. The oldest fall off the end.
+    var limit = 100
+    /// `NSPasteboard` has no change notification, so this is how often it is looked
+    /// at. Floored at 0.1s — this runs for the life of the process.
+    var pollInterval: TimeInterval = 1
+    /// Write the history to disk, so it survives a restart. Off unless asked for.
+    var persist = false
+}
+
 /// Positional shortcuts for the visible list: the nth key activates the nth row.
 /// Configured by `shortcuts = { ... }` in config.lua; `shortcuts = false` switches
 /// them off. Kept pure — no AppKit state beyond the flags — so the key map is
@@ -290,6 +304,7 @@ struct Settings: Sendable {
     var back = BackRowSpec()
     var shortcuts = ShortcutSpec()
     var apps = AppScanSpec()
+    var clipboard = ClipboardSpec()
 }
 
 // MARK: - Vim mode

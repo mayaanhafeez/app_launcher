@@ -197,6 +197,15 @@ return {
   -- next time the config is saved. Only works from the built .app bundle.
   login_item = false,
 
+  -- Clipboard history: a built-in `clipboard` menu (aliases: clip, history) listing
+  -- the last `limit` things you copied, newest first. Return re-copies an entry.
+  -- OFF BY DEFAULT, and nothing at all is recorded while it is off -- a launcher
+  -- that starts logging everything you copy unasked is not a good default.
+  -- Copies marked concealed or transient (password managers set this) are always
+  -- skipped. `persist` writes the history to disk; it is opt-in on its own, and
+  -- turning it back off deletes the file.
+  clipboard = { enabled = false, limit = 100, poll_interval = 1, persist = false },
+
   -- Frecency. Rows you activate often, and recently, rank higher in *search*
   -- results; the order you wrote below is never rearranged. `ranking = false`
   -- switches it off. `half_life` is in seconds, `weight` is the ceiling on the

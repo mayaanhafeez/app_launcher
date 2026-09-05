@@ -13,6 +13,7 @@ final class MenuController {
     let appIndex: AppIndex
     let runtime: LuaRuntime
     let usage: UsageStore
+    let clipboard: ClipboardHistory
     let commands = CommandRunner()
     var nodes: [MenuNode] = []
     /// Async rows for the current generation, held so that whichever source answers
@@ -30,6 +31,10 @@ final class MenuController {
     /// providers and commands from firing inside an actions list — both find their
     /// work by looking the active menu up by id.
     static let actionsMenuID = "orbit.actions"
+
+    /// The built-in clipboard route. A real node, so it lists, searches, aliases and
+    /// routes like anything else — only its rows come from somewhere else.
+    static let clipboardMenuID = "clipboard"
 
     private var activeMenu: String {
         switch location {
@@ -62,12 +67,25 @@ final class MenuController {
     var onNotice: ((String) -> Void)?
     var onDismiss: (() -> Void)?
 
-    /// `usage` defaults to a memory-only store so a test — or any caller that does not
-    /// opt in — can never read or write the real usage file.
-    init(appIndex: AppIndex, runtime: LuaRuntime, usage: UsageStore = UsageStore(url: nil)) {
+    /// Clipboard history, republished on every config reload. Off by default, so
+    /// nothing is captured until a config asks for it.
+    var clipboardSpec = ClipboardSpec() {
+        didSet {
+            guard clipboardSpec != oldValue else { return }
+            clipboard.apply(clipboardSpec)
+            syncClipboardNode()
+            refresh(query: query)
+        }
+    }
+
+    /// `usage` and `clipboard` default to memory-only stores so a test — or any caller
+    /// that does not opt in — can never read or write the real files.
+    init(appIndex: AppIndex, runtime: LuaRuntime, usage: UsageStore = UsageStore(url: nil),
+         clipboard: ClipboardHistory = ClipboardHistory(url: nil)) {
         self.appIndex = appIndex
         self.runtime = runtime
         self.usage = usage
+        self.clipboard = clipboard
         runtime.onReload = { [weak self] result in
             switch result {
             case .success(let nodes):
@@ -76,6 +94,7 @@ final class MenuController {
                 // one are no longer about anything.
                 self?.commands.clearCache()
                 self?.nodes = nodes
+                self?.syncClipboardNode()
                 self?.refresh(query: "")
             case .failure(let error): self?.onNotice?(error.localizedDescription)
             }
@@ -183,6 +202,7 @@ final class MenuController {
             guard !text.isBlank else { onNotice?("Nothing to copy"); return }
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
+            clipboard.noteOwnWrite()
             onDismiss?()
         case .revealInFinder(let path):
             NSWorkspace.shared.activateFileViewerSelecting([Self.fileURL(path)])
@@ -281,6 +301,10 @@ final class MenuController {
         let appBonus: (String) -> Int = { [usage] path in usage.bonus(for: "app:\(path)") }
         if menu == "apps" {
             rows.append(contentsOf: appIndex.results(for: query, limit: query.isEmpty ? appIndex.entries.count : search.appLimit, bonus: appBonus))
+        } else if menu == Self.clipboardMenuID {
+            // Already newest-first and capped by the store; no frecency, because the
+            // ordering of a clipboard history *is* its recency.
+            rows.append(contentsOf: clipboard.results(for: query, limit: clipboardSpec.limit))
         } else if menu == "root" && !query.isEmpty {
             rows.append(contentsOf: appIndex.results(for: query, limit: search.appLimit, bonus: appBonus))
         }
@@ -421,6 +445,20 @@ final class MenuController {
         let row = DisplayRow(id: "orbit.back", kind: .back, label: backRow.label, detail: backRow.detail,
                              symbol: backRow.symbol, image: nil, score: -1, section: "back")
         return backRow.atTop ? [row] + rows : rows + [row]
+    }
+
+    /// Injected the way `LuaRuntime` injects a missing `root`, and re-injected after
+    /// every reload because a reload replaces `nodes` wholesale. Disabling the feature
+    /// takes the row away again on the next save.
+    private func syncClipboardNode() {
+        nodes.removeAll { $0.id == Self.clipboardMenuID }
+        guard clipboardSpec.enabled else { return }
+        // `Int.max` sorts it below whatever the config author wrote: a built-in has no
+        // business displacing their own ordering.
+        nodes.append(MenuNode(id: Self.clipboardMenuID, parent: "root", kind: .menu, label: "Clipboard",
+                              detail: "Recently copied text", symbol: "doc.on.clipboard",
+                              aliases: ["clip", "history"], provider: nil, actionReference: nil,
+                              scriptAction: nil, order: Int.max))
     }
 
     private func isDescendant(_ node: MenuNode, of ancestor: String) -> Bool {
