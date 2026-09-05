@@ -371,6 +371,19 @@ final class LuaRuntime: @unchecked Sendable {
         }
         lua_settop(state, -2)
 
+        // `clipboard = false` is the default in all but name; the table form turns it
+        // on and tunes it. Decoded before `hotkey`, whose guard returns early.
+        lua_getfield(state, -1, "clipboard")
+        if lua_type(state, -1) == LUA_TBOOLEAN {
+            settings.clipboard.enabled = lua_toboolean(state, -1) != 0
+        } else if lua_type(state, -1) == LUA_TTABLE {
+            if let enabled = boolean(state, field: "enabled") { settings.clipboard.enabled = enabled }
+            if let value = number(state, field: "limit") { settings.clipboard.limit = max(1, Int(value)) }
+            if let value = number(state, field: "poll_interval") { settings.clipboard.pollInterval = max(0.1, value) }
+            if let persist = boolean(state, field: "persist") { settings.clipboard.persist = persist }
+        }
+        lua_settop(state, -2)
+
         lua_getfield(state, -1, "hotkey")
         defer { lua_settop(state, -2) }
         guard lua_type(state, -1) == LUA_TTABLE else { return settings }

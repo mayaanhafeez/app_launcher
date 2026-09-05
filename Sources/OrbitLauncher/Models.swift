@@ -106,6 +106,10 @@ struct DisplayRow: @unchecked Sendable {
     let section: String
     /// Set on provider rows, which have no backing `MenuNode` to look up.
     var action: ScriptAction? = nil
+    /// Set on the rows of an actions menu, which back no `MenuNode` either — and
+    /// unlike `action`, describe something the host does rather than something it
+    /// hands to Lua.
+    var rowAction: RowAction? = nil
 }
 
 struct AppEntry: @unchecked Sendable {
@@ -146,6 +150,20 @@ struct MenuBarSpec: Sendable, Equatable {
     var symbol = "circle.dashed"
     /// Text drawn beside the symbol. Empty is the icon-only default.
     var title = ""
+}
+
+/// Clipboard history, from `clipboard = { ... }` in config.lua. **Off by default**:
+/// a launcher that starts recording everything you copy without being asked is not a
+/// good default, and one that writes it to disk unasked is worse.
+struct ClipboardSpec: Sendable, Equatable {
+    var enabled = false
+    /// How many entries to keep. The oldest fall off the end.
+    var limit = 100
+    /// `NSPasteboard` has no change notification, so this is how often it is looked
+    /// at. Floored at 0.1s — this runs for the life of the process.
+    var pollInterval: TimeInterval = 1
+    /// Write the history to disk, so it survives a restart. Off unless asked for.
+    var persist = false
 }
 
 /// Positional shortcuts for the visible list: the nth key activates the nth row.
@@ -299,6 +317,7 @@ struct Settings: Sendable {
     var shortcuts = ShortcutSpec()
     var apps = AppScanSpec()
     var menuBar = MenuBarSpec()
+    var clipboard = ClipboardSpec()
 }
 
 // MARK: - Vim mode

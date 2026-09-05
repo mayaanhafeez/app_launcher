@@ -7,7 +7,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let runtime = LuaRuntime()
     private let themeRuntime = ThemeRuntime()
     private let usage = UsageStore(url: UsageStore.defaultURL)
-    private lazy var menu = MenuController(appIndex: appIndex, runtime: runtime, usage: usage)
+    private let clipboard = ClipboardHistory(url: ClipboardHistory.defaultURL)
+    private lazy var menu = MenuController(appIndex: appIndex, runtime: runtime, usage: usage, clipboard: clipboard)
     private let panel = PanelController()
     private var hotKey: GlobalHotKey?
     private var watcher: ConfigWatcher?
@@ -53,6 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 appliedMenuBarEnabled = settings.menuBar.enabled
                 if !settings.menuBar.enabled { warnAboutHiddenMenuBar() }
             }
+            menu.clipboardSpec = settings.clipboard
             watcher?.setDebounce(settings.watchDebounce)
             themePointerWatcher?.setDebounce(settings.watchDebounce)
             if appliedLoginItem != settings.loginItem {
@@ -70,6 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.onQuery = { [weak menu] query in menu?.update(query: query) }
         panel.onActivate = { [weak menu] row in menu?.activate(row) }
         panel.onBack = { [weak menu] in menu?.back() ?? false }
+        panel.onRowActions = { [weak menu] row in menu?.showActions(for: row) }
         panel.onDismiss = { [weak self] in self?.dismiss() }
     }
 
