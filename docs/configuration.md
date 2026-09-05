@@ -13,6 +13,7 @@ add, remove, or otherwise touch menu items.
 - [Menu items](#menu-items)
 - [Actions and `{query}`](#actions-and-query)
 - [Providers](#providers)
+- [Row actions](#row-actions)
 - [Settings](#settings)
 - [Theme](#theme)
 - [Worked example: a plugin from scratch](#worked-example-a-plugin-from-scratch)
@@ -218,6 +219,30 @@ backing item, so its shape is narrower than a static item's:
 A provider row has **no `action` function field** — providers describe actions
 as data, they don't hand back closures. A row with none of `shell`,
 `applescript`, `open`, or `url` set is purely informational (not activatable).
+
+## Row actions
+
+Tab — or ⌘↩ — on the selected row opens what else can be done with it. Escape
+returns to the list **with your query intact**.
+
+| Row | Actions |
+|---|---|
+| An app | Reveal in Finder, Copy Path, Open With…, Copy Label |
+| `shell = "..."` | Copy as Shell Command, Copy Label |
+| `url = "..."` | Copy URL, Copy Label |
+| `open = "..."` | Reveal in Finder, Copy Path, Open With…, Copy Label |
+| `applescript = "..."` | Copy AppleScript, Copy Label |
+| Anything else | Copy Label |
+
+Copy as Shell Command copies the command that would actually run, with `{query}`
+already substituted and escaped — not the template.
+
+The actions menu is an ordinary menu: it fuzzy-filters as you type, carries the
+same back row, and works under vim mode. Open With… nests one level deeper, and
+Escape unwinds one level at a time.
+
+There is nothing to configure here yet. Lua-contributed entries are not
+implemented; the built-in set ships first.
 
 ## Settings
 

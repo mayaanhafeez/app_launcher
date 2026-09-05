@@ -94,6 +94,7 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
     var onActivate: ((DisplayRow) -> Void)?
     var onBack: (() -> Bool)?
     var onDismiss: (() -> Void)?
+    var onRowActions: ((DisplayRow) -> Void)?
 
     init() {
         let panel = LauncherPanel(contentRect: NSRect(x: 0, y: 0, width: 380, height: 300), styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView], backing: .buffered, defer: false)
@@ -136,7 +137,7 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
         }
         guard mode == .normal else { return false }
         switch event.keyCode {
-        case 125, 126, 36, 76, 123: return false   // arrows and return keep working
+        case 125, 126, 36, 76, 123, 48: return false   // arrows, return and tab keep working
         default: return handleNormalMode(event)
         }
     }
@@ -379,6 +380,10 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
         case #selector(NSResponder.insertNewline(_:)): activateSelection(); return true
         case #selector(NSResponder.cancelOperation(_:)): escape(); return true
         case #selector(NSResponder.moveLeft(_:)) where input.stringValue.isEmpty: _ = goBack(); return true
+        // Tab carries no modifier, so `performKeyEquivalent` is never sent for it and
+        // `routeKey` cannot see it; this is the only path that does. Left unhandled it
+        // would move focus out of the field.
+        case #selector(NSResponder.insertTab(_:)): showRowActions(); return true
         default: return false
         }
     }
@@ -404,6 +409,12 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
         if let position = shortcuts.position(for: event.charactersIgnoringModifiers ?? "",
                                              modifiers: event.modifierFlags) {
             return activate(position: position)
+        }
+        // ⌘↩ is the other way into the row's actions, and has to be claimed before the
+        // bare Return cases below, which would activate the row instead.
+        if event.keyCode == 36 || event.keyCode == 76, event.modifierFlags.contains(.command) {
+            showRowActions()
+            return true
         }
         switch event.keyCode {
         case 53: escape(); return true
@@ -495,6 +506,12 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
         table.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
         onActivate?(rows[index])
         return true
+    }
+
+    private func showRowActions() {
+        let index = table.selectedRow < 0 ? 0 : table.selectedRow
+        guard rows.indices.contains(index) else { return }
+        onRowActions?(rows[index])
     }
 
     private func activateSelection() {

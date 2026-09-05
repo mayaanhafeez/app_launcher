@@ -181,6 +181,35 @@ detail visibility needs a matching `noteHeightOfRows` call. `RowView` centres it
 `selectionBackground` rather than pinning to the top, which is what keeps single-line rows aligned
 with their icon.
 
+### Row actions
+
+Tab (or ⌘↩) on the selected row pushes its actions — Reveal in Finder, Copy Path, Open With…, Copy as Shell Command,
+Copy Label — as **a menu like any other**, not a modal surface: same list, same fuzzy filter, same back row, same vim
+keys. `RowActions.entries(for:query:)` (`RowActions.swift`) is the whole table and is pure, like `VimKeys` and
+`EditingKeys`, so it is testable without a window. It takes the query because `ScriptAction.resolved(query:)` is what
+makes "Copy as Shell Command" copy the command that would actually run rather than a template with a `{query}` hole.
+
+`RowAction` is a value, not a closure, for the same reason `ScriptAction` is: the row *describes* what to do and
+`MenuController.perform` does it. It is carried on `DisplayRow.rowAction` and checked in `activate` **before** the node
+lookup, exactly as `action` is — an actions row backs no `MenuNode`. Every case dismisses except `openWithPicker`, which
+navigates.
+
+Navigation had to generalise for this. `activeMenu`/`navigation: [String]` became `location: MenuLocation` and a stack
+of `Frame`s, because an actions menu is built from a `DisplayRow` and cannot be named by an id. `activeMenu` survives as
+a computed property returning the node id or the sentinel `orbit.actions`, and that sentinel is what keeps the blast
+radius small: it matches no node, so `decorated` still adds the back row (it only withholds one at `root`) and neither
+the provider nor the command lookup finds anything to run.
+
+A `Frame` carries an optional `restoreQuery`. **Only actions frames set it** — an actions menu is a detour from a search,
+so the search must survive it, whereas leaving an ordinary submenu is a fresh start and still clears the query. `back()`
+*refreshes* with the restored query rather than only re-emitting it, because `PanelController.setQuery` deliberately
+does not fire `onQuery` back.
+
+Key routing splits the two chords across the two paths it has to: ⌘↩ is modified so it reaches `routeKey`, where it is
+claimed before the bare Return cases; Tab is unmodified, so `performKeyEquivalent` is never sent for it and it can only
+be caught as `insertTab:` in `control(_:textView:doCommandBy:)`. Tab also had to be added to the pass-through list in
+`consumesInNormalMode`, or vim's normal mode swallows it as an unmapped key.
+
 ### List shortcuts
 
 `ShortcutSpec` (`Models.swift`) is positional, not per-item: the nth key activates the nth row of whatever the list is
