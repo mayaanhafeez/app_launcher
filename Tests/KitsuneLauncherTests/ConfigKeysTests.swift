@@ -123,24 +123,24 @@ import Testing
 }
 
 @Test func menuBarBlockDecodes() async {
-    let (runtime, load, directory) = await orbitLoadConfig("""
+    let (runtime, load, directory) = await kitsuneLoadConfig("""
     return {
-      menu_bar = { enabled = true, symbol = "bolt.fill", title = "Orbit" },
+      menu_bar = { enabled = true, symbol = "bolt.fill", title = "Kitsune" },
       items = { { id = "root", label = "Go" } },
     }
     """)
-    defer { orbitRemove(directory); _ = runtime }
+    defer { kitsuneRemove(directory); _ = runtime }
 
     #expect(load.settings?.menuBar.enabled == true)
     #expect(load.settings?.menuBar.symbol == "bolt.fill")
-    #expect(load.settings?.menuBar.title == "Orbit")
+    #expect(load.settings?.menuBar.title == "Kitsune")
 }
 
 @Test func menuBarFalseRemovesTheStatusItem() async {
-    let (runtime, load, directory) = await orbitLoadConfig("""
+    let (runtime, load, directory) = await kitsuneLoadConfig("""
     return { menu_bar = false, items = { { id = "root", label = "Go" } } }
     """)
-    defer { orbitRemove(directory); _ = runtime }
+    defer { kitsuneRemove(directory); _ = runtime }
 
     #expect(load.settings?.menuBar.enabled == false)
     // The short form must leave the rest of the spec alone, so re-enabling it later
@@ -150,35 +150,35 @@ import Testing
 }
 
 @Test func absentMenuBarKeysKeepTheirDefaults() async {
-    let (runtime, load, directory) = await orbitLoadConfig("""
-    return { menu_bar = { title = "Orbit" }, items = { { id = "root", label = "Go" } } }
+    let (runtime, load, directory) = await kitsuneLoadConfig("""
+    return { menu_bar = { title = "Kitsune" }, items = { { id = "root", label = "Go" } } }
     """)
-    defer { orbitRemove(directory); _ = runtime }
+    defer { kitsuneRemove(directory); _ = runtime }
 
     // Present by default: the status item is the only way to reload or quit.
     #expect(load.settings?.menuBar.enabled == true)
     #expect(load.settings?.menuBar.symbol == MenuBarSpec().symbol)
-    #expect(load.settings?.menuBar.title == "Orbit")
+    #expect(load.settings?.menuBar.title == "Kitsune")
 }
 
 // An empty `symbol` would blank the button and leave nothing to click, so it is
 // treated as absent — the same rule `back.label` follows.
 @Test func blankMenuBarSymbolKeepsTheDefault() async {
-    let (runtime, load, directory) = await orbitLoadConfig("""
+    let (runtime, load, directory) = await kitsuneLoadConfig("""
     return { menu_bar = { symbol = "" }, items = { { id = "root", label = "Go" } } }
     """)
-    defer { orbitRemove(directory); _ = runtime }
+    defer { kitsuneRemove(directory); _ = runtime }
     #expect(load.settings?.menuBar.symbol == MenuBarSpec().symbol)
 }
 
 @Test func clipboardBlockDecodes() async {
-    let (runtime, load, directory) = await orbitLoadConfig("""
+    let (runtime, load, directory) = await kitsuneLoadConfig("""
     return {
       clipboard = { enabled = true, limit = 25, poll_interval = 0.5, persist = true },
       items = { { id = "root", label = "Go" } },
     }
     """)
-    defer { orbitRemove(directory); _ = runtime }
+    defer { kitsuneRemove(directory); _ = runtime }
 
     #expect(load.settings?.clipboard.enabled == true)
     #expect(load.settings?.clipboard.limit == 25)
@@ -189,10 +189,10 @@ import Testing
 // Recording everything a user copies, and writing it to disk, are both things to be
 // asked for rather than defaulted into.
 @Test func clipboardIsOffAndEphemeralByDefault() async {
-    let (runtime, load, directory) = await orbitLoadConfig("""
+    let (runtime, load, directory) = await kitsuneLoadConfig("""
     return { items = { { id = "root", label = "Go" } } }
     """)
-    defer { orbitRemove(directory); _ = runtime }
+    defer { kitsuneRemove(directory); _ = runtime }
 
     #expect(load.settings?.clipboard.enabled == false)
     #expect(load.settings?.clipboard.persist == false)
@@ -201,10 +201,10 @@ import Testing
 
 // `enabled = true` alone must not drag persistence along with it.
 @Test func enablingTheClipboardDoesNotEnablePersistence() async {
-    let (runtime, load, directory) = await orbitLoadConfig("""
+    let (runtime, load, directory) = await kitsuneLoadConfig("""
     return { clipboard = true, items = { { id = "root", label = "Go" } } }
     """)
-    defer { orbitRemove(directory); _ = runtime }
+    defer { kitsuneRemove(directory); _ = runtime }
 
     #expect(load.settings?.clipboard.enabled == true)
     #expect(load.settings?.clipboard.persist == false)
@@ -212,9 +212,9 @@ import Testing
 
 // A poll interval of zero would spin the main queue for the life of the process.
 @Test func theClipboardPollIntervalIsFloored() async {
-    let (runtime, load, directory) = await orbitLoadConfig("""
+    let (runtime, load, directory) = await kitsuneLoadConfig("""
     return { clipboard = { poll_interval = 0 }, items = { { id = "root", label = "Go" } } }
     """)
-    defer { orbitRemove(directory); _ = runtime }
+    defer { kitsuneRemove(directory); _ = runtime }
     #expect(load.settings?.clipboard.pollInterval == 0.1)
 }

@@ -374,12 +374,12 @@ clipboard = { enabled = false, limit = 100, poll_interval = 1, persist = false }
 ```
 
 Adds a built-in **`clipboard`** menu (also reachable as `clip` or `history`, and
-via `orbitctl show clipboard`) listing the last `limit` strings you copied,
+via `kitsunectl show clipboard`) listing the last `limit` strings you copied,
 newest first and fuzzy-searchable. Return copies an entry back to the pasteboard
 and dismisses.
 
 `NSPasteboard` has no change notification, so `poll_interval` is how often — in
-seconds, floored at `0.1` — Orbit looks at it. This is also why the feature has
+seconds, floored at `0.1` — Kitsune looks at it. This is also why the feature has
 to be native and cannot be a Lua provider: a provider only runs while its menu is
 open, and is re-loaded into a fresh state on every keystroke, so it can neither
 watch nor remember anything.
@@ -396,7 +396,7 @@ Two things are never captured:
   was copied before you asked for any of this.
 
 `persist = true` writes the history to `~/Library/Application
-Support/Orbit/clipboard.json`. It is opt-in separately from `enabled`, and
+Support/Kitsune/clipboard.json`. It is opt-in separately from `enabled`, and
 setting it back to `false` deletes the file rather than leaving what was already
 written on disk.
 
@@ -429,17 +429,17 @@ bar's light/dark appearance. An unknown name leaves the button's current icon in
 place rather than blanking it — the same rule `hotkey` follows for an unknown key.
 `title` draws text beside the symbol; empty is the icon-only default.
 
-**Removing it costs you something.** Orbit is `LSUIElement`: no Dock icon, and no
+**Removing it costs you something.** Kitsune is `LSUIElement`: no Dock icon, and no
 main menu. The status item is the only UI outside the panel, so with
 `enabled = false` the only remaining ways to reload the config or quit are:
 
 ```sh
-orbitctl reload
-orbitctl hide
-killall OrbitLauncher
+kitsunectl reload
+kitsunectl hide
+killall KitsuneLauncher
 ```
 
-Orbit raises a one-time alert saying exactly that the first time the item is
+Kitsune raises a one-time alert saying exactly that the first time the item is
 switched off, and never mentions it again.
 
 ### `palette`

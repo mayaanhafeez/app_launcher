@@ -211,7 +211,7 @@ return {
 
   -- The menu bar item. `menu_bar = false` removes it entirely -- but the app has no
   -- Dock icon either, so with it gone the only ways left to reload or quit are
-  -- `orbitctl` and `kill`. Orbit says so once, the first time you switch it off.
+  -- `kitsunectl` and `kill`. Kitsune says so once, the first time you switch it off.
   -- `symbol` is any SF Symbol; an unknown name leaves the current icon alone.
   -- `title` draws text beside it, and is empty for the icon-only default.
   menu_bar = { enabled = true, symbol = "circle.dashed", title = "" },

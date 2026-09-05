@@ -47,7 +47,7 @@ final class ClipboardHistory {
     static var defaultURL: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support")
-        return base.appendingPathComponent("Orbit/clipboard.json")
+        return base.appendingPathComponent("Kitsune/clipboard.json")
     }
 
     /// `nil` for `url` keeps the history in memory whatever `persist` says. Tests

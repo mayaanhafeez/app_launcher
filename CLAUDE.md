@@ -163,7 +163,7 @@ lets the whole state machine be tested without touching the developer's clipboar
 `url: nil`.
 
 The route is a real `MenuNode` injected the way `LuaRuntime` injects a missing `root`, so listing, search, aliases and
-`orbitctl show clipboard` all come for free; only `build` knows where the rows come from, beside the existing `apps`
+`kitsunectl show clipboard` all come for free; only `build` knows where the rows come from, beside the existing `apps`
 case. It is re-injected after every reload because a reload replaces `nodes` wholesale. Rows carry
 `rowAction = .copyText`, so Return goes through the row-action path and there is no second dispatch route to keep in
 step — and `perform` calls `noteOwnWrite()` after writing, so re-copying an entry is not read back in as a fresh copy.
@@ -220,7 +220,7 @@ navigates.
 
 Navigation had to generalise for this. `activeMenu`/`navigation: [String]` became `location: MenuLocation` and a stack
 of `Frame`s, because an actions menu is built from a `DisplayRow` and cannot be named by an id. `activeMenu` survives as
-a computed property returning the node id or the sentinel `orbit.actions`, and that sentinel is what keeps the blast
+a computed property returning the node id or the sentinel `kitsune.actions`, and that sentinel is what keeps the blast
 radius small: it matches no node, so `decorated` still adds the back row (it only withholds one at `root`) and neither
 the provider nor the command lookup finds anything to run.
 
@@ -289,7 +289,7 @@ runs **before** `reloadAll()` for this reason: the spec arrives with the first s
 apply to.
 
 Switching it off is a one-way door for discoverability, so the first time it happens `AppDelegate` raises a modal
-`NSAlert` naming `orbitctl` and `kill` as what's left, gated on a `UserDefaults` flag so it never fires twice. The
+`NSAlert` naming `kitsunectl` and `kill` as what's left, gated on a `UserDefaults` flag so it never fires twice. The
 panel's own `showNotice` is no use here — it auto-hides after five seconds and the panel is shut when a config save
 lands.
 

@@ -1,6 +1,6 @@
 import AppKit
 import Testing
-@testable import OrbitLauncher
+@testable import KitsuneLauncher
 
 // The store is driven through an injected reading rather than the real pasteboard,
 // so a test run can neither read what the developer has copied nor write to their
@@ -108,28 +108,28 @@ private func store(_ pasteboard: FakePasteboard, url: URL? = nil,
 // leaving what was already written sitting on disk.
 @MainActor
 @Test func nothingIsWrittenUnlessPersistIsAskedFor() async {
-    let directory = orbitTemporaryDirectory("orbit-clip")
-    defer { orbitRemove(directory) }
+    let directory = kitsuneTemporaryDirectory("kitsune-clip")
+    defer { kitsuneRemove(directory) }
     let url = directory.appendingPathComponent("clipboard.json")
     let pasteboard = FakePasteboard()
 
     let history = store(pasteboard, url: url)
     pasteboard.copy("secret"); history.poll()
     // The flush is coalesced at two seconds; nothing should appear before or after.
-    _ = await orbitWaitUntil(timeout: 2.5) { false }
+    _ = await kitsuneWaitUntil(timeout: 2.5) { false }
     #expect(!FileManager.default.fileExists(atPath: url.path))
 }
 
 @MainActor
 @Test func persistedHistoryRoundTripsThroughItsFile() async {
-    let directory = orbitTemporaryDirectory("orbit-clip")
-    defer { orbitRemove(directory) }
+    let directory = kitsuneTemporaryDirectory("kitsune-clip")
+    defer { kitsuneRemove(directory) }
     let url = directory.appendingPathComponent("clipboard.json")
     let pasteboard = FakePasteboard()
 
     let history = store(pasteboard, url: url, ClipboardSpec(enabled: true, persist: true))
     pasteboard.copy("remembered"); history.poll()
-    #expect(await orbitWaitUntil(timeout: 5) { FileManager.default.fileExists(atPath: url.path) })
+    #expect(await kitsuneWaitUntil(timeout: 5) { FileManager.default.fileExists(atPath: url.path) })
 
     let reopened = ClipboardHistory(url: url, read: { pasteboard.reading })
     #expect(reopened.entries.map(\.text) == ["remembered"])

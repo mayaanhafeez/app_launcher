@@ -129,18 +129,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// panel's own notice is no use here: it auto-hides after five seconds and the
     /// panel is shut when a config save lands, so nobody would ever see it. An
     /// accessory app has to activate before a modal alert is visible.
-    private static let menuBarNoticeKey = "orbit.menuBarNoticeShown"
+    private static let menuBarNoticeKey = "kitsune.menuBarNoticeShown"
 
     private func warnAboutHiddenMenuBar() {
         guard !UserDefaults.standard.bool(forKey: Self.menuBarNoticeKey) else { return }
         UserDefaults.standard.set(true, forKey: Self.menuBarNoticeKey)
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
-        alert.messageText = "Orbit's menu bar item is now hidden"
+        alert.messageText = "Kitsune's menu bar item is now hidden"
         alert.informativeText = """
-        Orbit keeps running in the background, but it has no Dock icon and no menu bar \
-        item, so the only ways left to reload or quit it are `orbitctl reload`, \
-        `orbitctl hide` and killing the process.
+        Kitsune keeps running in the background, but it has no Dock icon and no menu bar \
+        item, so the only ways left to reload or quit it are `kitsunectl reload`, \
+        `kitsunectl hide` and killing the process.
 
         Set `menu_bar = { enabled = true }` in config.lua to bring it back.
         """

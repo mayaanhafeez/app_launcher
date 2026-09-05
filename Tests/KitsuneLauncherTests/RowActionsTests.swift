@@ -1,6 +1,6 @@
 import AppKit
 import Testing
-@testable import OrbitLauncher
+@testable import KitsuneLauncher
 
 // `RowActions.entries` is a pure function of a row, like `VimKeys.normalModeAction`
 // and `ShortcutSpec.position`, so the whole table is assertable without a window.
@@ -57,7 +57,7 @@ private func row(_ id: String, kind: RowKind, label: String = "Row",
 // The back row is chrome, not an item. An empty list is why `showActions` no-ops
 // on it rather than pushing a menu the user has to escape back out of.
 @Test func theBackRowOffersNothing() {
-    #expect(RowActions.entries(for: row("orbit.back", kind: .back, label: "Back"), query: "").isEmpty)
+    #expect(RowActions.entries(for: row("kitsune.back", kind: .back, label: "Back"), query: "").isEmpty)
 }
 
 // A blank target is a no-op everywhere else in the launcher, and is here too:

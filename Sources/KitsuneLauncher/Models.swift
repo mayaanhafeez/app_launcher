@@ -157,7 +157,7 @@ struct BackRowSpec: Sendable, Equatable {
 
 /// The status item, configured by `menu_bar = { ... }` in config.lua. `menu_bar = false`
 /// removes it entirely — which also removes the only way to reload or quit without
-/// `orbitctl`, since the app is `LSUIElement` and builds no main menu.
+/// `kitsunectl`, since the app is `LSUIElement` and builds no main menu.
 struct MenuBarSpec: Sendable, Equatable {
     var enabled = true
     /// SF Symbol for the button. An unknown name leaves the button's image alone

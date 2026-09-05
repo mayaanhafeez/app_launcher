@@ -51,22 +51,22 @@ enum RowActions {
         } else if let action = row.action?.resolved(query: query) {
             switch action {
             case .shell(let command) where !command.isBlank:
-                entries.append(RowActionEntry(id: "orbit.action.copy-shell", label: "Copy as Shell Command",
+                entries.append(RowActionEntry(id: "kitsune.action.copy-shell", label: "Copy as Shell Command",
                                               symbol: "terminal", detail: command, action: .copyText(command)))
             case .url(let url) where !url.isBlank:
-                entries.append(RowActionEntry(id: "orbit.action.copy-url", label: "Copy URL",
+                entries.append(RowActionEntry(id: "kitsune.action.copy-url", label: "Copy URL",
                                               symbol: "link", detail: url, action: .copyText(url)))
             case .open(let path) where !path.isBlank:
                 entries += fileEntries(path: path)
             case .appleScript(let script) where !script.isBlank:
-                entries.append(RowActionEntry(id: "orbit.action.copy-script", label: "Copy AppleScript",
+                entries.append(RowActionEntry(id: "kitsune.action.copy-script", label: "Copy AppleScript",
                                               symbol: "applescript", detail: script, action: .copyText(script)))
             default: break
             }
         }
 
         // Last, and offered on every row: whatever else a row is, it has a label.
-        entries.append(RowActionEntry(id: "orbit.action.copy-label", label: "Copy Label",
+        entries.append(RowActionEntry(id: "kitsune.action.copy-label", label: "Copy Label",
                                       symbol: "doc.on.doc", detail: row.label, action: .copyText(row.label)))
         return entries
     }
@@ -76,11 +76,11 @@ enum RowActions {
     private static func fileEntries(path: String) -> [RowActionEntry] {
         guard !path.isBlank else { return [] }
         return [
-            RowActionEntry(id: "orbit.action.reveal", label: "Reveal in Finder",
+            RowActionEntry(id: "kitsune.action.reveal", label: "Reveal in Finder",
                            symbol: "folder", detail: path, action: .revealInFinder(path)),
-            RowActionEntry(id: "orbit.action.copy-path", label: "Copy Path",
+            RowActionEntry(id: "kitsune.action.copy-path", label: "Copy Path",
                            symbol: "doc.on.doc", detail: path, action: .copyText(path)),
-            RowActionEntry(id: "orbit.action.open-with", label: "Open With…",
+            RowActionEntry(id: "kitsune.action.open-with", label: "Open With…",
                            symbol: "arrow.up.forward.app", detail: "", action: .openWithPicker(path)),
         ]
     }

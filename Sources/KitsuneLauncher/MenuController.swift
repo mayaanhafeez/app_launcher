@@ -30,7 +30,7 @@ final class MenuController {
     /// keeps the back row present (`decorated` only withholds it at `root`) and keeps
     /// providers and commands from firing inside an actions list — both find their
     /// work by looking the active menu up by id.
-    static let actionsMenuID = "orbit.actions"
+    static let actionsMenuID = "kitsune.actions"
 
     /// The built-in clipboard route. A real node, so it lists, searches, aliases and
     /// routes like anything else — only its rows come from somewhere else.
@@ -228,7 +228,7 @@ final class MenuController {
     /// display name still get distinct ids.
     private static func openWithEntries(for target: String) -> [RowActionEntry] {
         NSWorkspace.shared.urlsForApplications(toOpen: fileURL(target)).map { app in
-            RowActionEntry(id: "orbit.action.open-with:\(app.path)",
+            RowActionEntry(id: "kitsune.action.open-with:\(app.path)",
                            label: FileManager.default.displayName(atPath: app.path),
                            symbol: "app", detail: app.path,
                            action: .openWith(appPath: app.path, target: target))
