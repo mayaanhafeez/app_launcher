@@ -2,11 +2,11 @@
 import PackageDescription
 
 let package = Package(
-    name: "OrbitLauncher",
+    name: "KitsuneLauncher",
     platforms: [.macOS(.v13)],
     products: [
-        .executable(name: "OrbitLauncher", targets: ["OrbitLauncher"]),
-        .executable(name: "orbitctl", targets: ["OrbitCLI"]),
+        .executable(name: "KitsuneLauncher", targets: ["KitsuneLauncher"]),
+        .executable(name: "kitsunectl", targets: ["KitsuneCLI"]),
     ],
     targets: [
         .target(
@@ -21,16 +21,16 @@ let package = Package(
             linkerSettings: [.linkedLibrary("readline")]
         ),
         .executableTarget(
-            name: "OrbitLauncher",
+            name: "KitsuneLauncher",
             dependencies: ["CLua"],
-            path: "Sources/OrbitLauncher",
+            path: "Sources/KitsuneLauncher",
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("Carbon"),
                 .linkedFramework("CoreServices"),
             ]
         ),
-        .executableTarget(name: "OrbitCLI", path: "Sources/OrbitCLI"),
-        .testTarget(name: "OrbitLauncherTests", dependencies: ["OrbitLauncher"], path: "Tests/OrbitLauncherTests"),
+        .executableTarget(name: "KitsuneCLI", path: "Sources/KitsuneCLI"),
+        .testTarget(name: "KitsuneLauncherTests", dependencies: ["KitsuneLauncher"], path: "Tests/KitsuneLauncherTests"),
     ]
 )

@@ -1,4 +1,4 @@
--- Example plugin. Copy the plugins/ directory to ~/.config/orbit/ and add its name
+-- Example plugin. Copy the plugins/ directory to ~/.config/kitsune/ and add its name
 -- to the plugin list in config.lua. A plugin returns items and/or providers; ids are
 -- dotted the same way, so it can hang rows off any existing submenu.
 
@@ -20,7 +20,7 @@ return {
     item("dev.notify", "Say Hello", {
       symbol = "bell",
       action = function(query)
-        osascript(string.format('display notification %q with title "Orbit"',
+        osascript(string.format('display notification %q with title "Kitsune"',
           query ~= "" and query or "hello"))
       end,
     }),

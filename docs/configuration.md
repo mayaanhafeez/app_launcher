@@ -1,8 +1,8 @@
 # Configuration reference
 
-This is the complete reference for what `~/.config/orbit/config.lua` and
-`~/.config/orbit/theme.lua` can express. For install/build instructions and the
-`orbitctl` command list, see the [README](../README.md).
+This is the complete reference for what `~/.config/kitsune/config.lua` and
+`~/.config/kitsune/theme.lua` can express. For install/build instructions and the
+`kitsunectl` command list, see the [README](../README.md).
 
 Both files reload automatically on save. `config.lua` runs with full execution
 privileges and rebuilds the entire menu tree; `theme.lua` runs in a separate,
@@ -22,39 +22,39 @@ add, remove, or otherwise touch menu items.
 
 | File | Purpose |
 |---|---|
-| `~/.config/orbit/config.lua` | Menu tree, actions, providers, settings |
-| `~/.config/orbit/theme.lua` | Colors, spacing, typography |
-| `~/.config/orbit/plugins/*.lua` | Anything you `require "plugins.<name>"` |
-| `~/.config/orbit/lua/*.lua` | Anything you `require "<name>"` |
-| `~/.config/orbit/themes/*.{toml,yaml,yml,conf,theme}` | Local colour scheme files for `palette = "<name>"` |
+| `~/.config/kitsune/config.lua` | Menu tree, actions, providers, settings |
+| `~/.config/kitsune/theme.lua` | Colors, spacing, typography |
+| `~/.config/kitsune/plugins/*.lua` | Anything you `require "plugins.<name>"` |
+| `~/.config/kitsune/lua/*.lua` | Anything you `require "<name>"` |
+| `~/.config/kitsune/themes/*.{toml,yaml,yml,conf,theme}` | Local colour scheme files for `palette = "<name>"` |
 
 `config.lua`'s Lua state points `package.path` at:
 
 ```
-~/.config/orbit/?.lua
-~/.config/orbit/?/init.lua
-~/.config/orbit/plugins/?.lua
-~/.config/orbit/plugins/?/init.lua
-~/.config/orbit/lua/?.lua
-~/.config/orbit/lua/?/init.lua
+~/.config/kitsune/?.lua
+~/.config/kitsune/?/init.lua
+~/.config/kitsune/plugins/?.lua
+~/.config/kitsune/plugins/?/init.lua
+~/.config/kitsune/lua/?.lua
+~/.config/kitsune/lua/?/init.lua
 ```
 
 so a config splits up exactly the way a Neovim config does — `require
-"plugins.git"` resolves `~/.config/orbit/plugins/git.lua`, `require "foo"` resolves
-`~/.config/orbit/lua/foo.lua` or `~/.config/orbit/foo.lua`. `package.cpath` is
+"plugins.git"` resolves `~/.config/kitsune/plugins/git.lua`, `require "foo"` resolves
+`~/.config/kitsune/lua/foo.lua` or `~/.config/kitsune/foo.lua`. `package.cpath` is
 emptied in every state: no C extension modules, ever — a launcher config has no
 business `dlopen`-ing.
 
-A global `orbit` table is available everywhere:
+A global `kitsune` table is available everywhere:
 
 | Field | Value |
 |---|---|
-| `orbit.config_dir` | `~/.config/orbit` |
-| `orbit.plugin_dir` | `~/.config/orbit/plugins` |
-| `orbit.home` | The user's home directory |
-| `orbit.can_execute` | `true` in the config state, `false` inside a provider call |
+| `kitsune.config_dir` | `~/.config/kitsune` |
+| `kitsune.plugin_dir` | `~/.config/kitsune/plugins` |
+| `kitsune.home` | The user's home directory |
+| `kitsune.can_execute` | `true` in the config state, `false` inside a provider call |
 
-If `~/.config/orbit/config.lua` doesn't exist, Orbit falls back to a small
+If `~/.config/kitsune/config.lua` doesn't exist, Kitsune falls back to a small
 built-in menu (Apps / System / Tools) rather than failing to launch.
 
 ## Menu items
@@ -84,7 +84,7 @@ return {
 | `detail` | Subtitle. Visibility is controlled by `theme.lua`'s `detail_mode`. While the user is searching, an item found via drilldown has its `detail` replaced by a breadcrumb (e.g. `Development > Servers`) instead. |
 | `symbol` | An SF Symbol name. |
 | `icon` | Path to an image file (`~` allowed). **Wins over `symbol`** when both are set — the symbol glyph is simply not drawn. |
-| `aliases` | Extra route strings for `orbitctl show <alias>` / `orbitctl invoke <alias>`. Also folded into fuzzy search alongside the label, detail, and the id's last dotted segment (`install.editor.zed` is found by typing `zed`). |
+| `aliases` | Extra route strings for `kitsunectl show <alias>` / `kitsunectl invoke <alias>`. Also folded into fuzzy search alongside the label, detail, and the id's last dotted segment (`install.editor.zed` is found by typing `zed`). |
 | `provider` | Name of a function in the top-level `providers` table that supplies this item's *children* at query time. See [Providers](#providers). |
 | `shell` / `applescript` / `open` / `url` | What the row does. See below. |
 | `action` | A Lua function `function(query) ... end`, run in the full config state (with `terminal`/`run`/`osascript` available). See below. |
@@ -97,7 +97,7 @@ If more than one action field is set on the same item, only one runs, in this
 priority order: `action` (the Lua function) first, then `shell`, then
 `applescript`, then `open`, then `url`.
 
-If no item in `items` has `id = "root"`, Orbit inserts a default one for you so
+If no item in `items` has `id = "root"`, Kitsune inserts a default one for you so
 there's always a top level to open.
 
 ## Actions and `{query}`
@@ -122,12 +122,12 @@ there's always a top level to open.
     id = "dev.notify",
     label = "Notify",
     action = function(query)
-      osascript('display notification "' .. (query ~= "" and query or "hi") .. '" with title "Orbit"')
+      osascript('display notification "' .. (query ~= "" and query or "hi") .. '" with title "Kitsune"')
     end,
   }
   ```
 
-  Lua has no `io`, and `os.execute` is removed in every Lua state Orbit creates —
+  Lua has no `io`, and `os.execute` is removed in every Lua state Kitsune creates —
   `terminal`, `run` and `osascript` are the only way to run something external,
   and each call is logged by the host.
 
@@ -188,7 +188,7 @@ one; it cannot execute anything itself.
 
 Two more constraints follow directly from how a provider actually runs:
 
-- **Providers are serialized and reloaded on every call.** Orbit `lua_dump`s the
+- **Providers are serialized and reloaded on every call.** Kitsune `lua_dump`s the
   provider function out of the config state and reloads that bytecode into a
   fresh sandboxed state per query. That means **a provider function must be
   self-contained — no upvalues beyond `_ENV`.** A `local` declared outside the
@@ -199,7 +199,7 @@ Two more constraints follow directly from how a provider actually runs:
   string literal via `load(string.format(...))` rather than closing over a
   local).
 - **Each call has a 0.15 second budget** (plus a shared 1,000,000 Lua
-  instruction ceiling that applies to every script Orbit runs). A provider has
+  instruction ceiling that applies to every script Kitsune runs). A provider has
   to be fast and pure — no network calls, no sleeping, no expensive scans.
 
 ### Provider row fields
@@ -259,20 +259,20 @@ hotkeys = {
 },
 ```
 
-Every global chord Orbit binds. Each entry does one of three things:
+Every global chord Kitsune binds. Each entry does one of three things:
 
 | Entry | Effect |
 |---|---|
 | neither `route` nor `invoke` | Toggles the panel at the root menu — the default, and what a single `hotkey` has always done |
-| `route = "id"` | Toggles the panel already inside that submenu. Resolves like `orbitctl show`: exact id first, then aliases |
-| `invoke = "id"` | Fires that node's action **without ever showing the panel**, through the same path as `orbitctl invoke` |
+| `route = "id"` | Toggles the panel already inside that submenu. Resolves like `kitsunectl show`: exact id first, then aliases |
+| `invoke = "id"` | Fires that node's action **without ever showing the panel**, through the same path as `kitsunectl invoke` |
 
 `invoke` wins if an entry sets both. A node that is a category, or an id that
-matches nothing, can't be invoked — Orbit logs it and shows a notice.
+matches nothing, can't be invoked — Kitsune logs it and shows a notice.
 
-Registration is per slot, so **a chord Orbit cannot bind costs only its own
+Registration is per slot, so **a chord Kitsune cannot bind costs only its own
 line**: every other entry stays bound, and the failed slot keeps whatever it had
-before. A chord can fail either because `key` isn't a name Orbit knows, or
+before. A chord can fail either because `key` isn't a name Kitsune knows, or
 because another application already holds it system-wide; the notice names the
 chords that failed and nothing else. An empty `hotkeys = {}` leaves the default
 binding in place rather than leaving you with no way to open the launcher.
@@ -328,7 +328,7 @@ back = { enabled = true, label = "Back", symbol = "chevron.left", detail = "", p
 Configures the synthetic row that leaves a submenu. `back = false` removes it
 entirely. `position` is `"top"` or `"bottom"`; anything else is treated as
 `"top"`. The back row never appears at the root menu, and it's skipped when
-Orbit picks which row starts selected on a fresh submenu (so pressing Return
+Kitsune picks which row starts selected on a fresh submenu (so pressing Return
 immediately after opening a submenu never walks straight back out).
 
 ### `shortcuts`
@@ -374,12 +374,12 @@ clipboard = { enabled = false, limit = 100, poll_interval = 1, persist = false }
 ```
 
 Adds a built-in **`clipboard`** menu (also reachable as `clip` or `history`, and
-via `orbitctl show clipboard`) listing the last `limit` strings you copied,
+via `kitsunectl show clipboard`) listing the last `limit` strings you copied,
 newest first and fuzzy-searchable. Return copies an entry back to the pasteboard
 and dismisses.
 
 `NSPasteboard` has no change notification, so `poll_interval` is how often — in
-seconds, floored at `0.1` — Orbit looks at it. This is also why the feature has
+seconds, floored at `0.1` — Kitsune looks at it. This is also why the feature has
 to be native and cannot be a Lua provider: a provider only runs while its menu is
 open, and is re-loaded into a fresh state on every keystroke, so it can neither
 watch nor remember anything.
@@ -396,7 +396,7 @@ Two things are never captured:
   was copied before you asked for any of this.
 
 `persist = true` writes the history to `~/Library/Application
-Support/Orbit/clipboard.json`. It is opt-in separately from `enabled`, and
+Support/Kitsune/clipboard.json`. It is opt-in separately from `enabled`, and
 setting it back to `false` deletes the file rather than leaving what was already
 written on disk.
 
@@ -406,7 +406,7 @@ written on disk.
 login_item = false,   -- default
 ```
 
-Registers Orbit to launch at login via `SMAppService`. Off by default —
+Registers Kitsune to launch at login via `SMAppService`. Off by default —
 registering something with launchd isn't something to opt a user into silently.
 Only takes effect when applied *value changes*, so toggling it from the menu
 bar survives an unrelated `config.lua` save; editing this key back is still
@@ -429,17 +429,17 @@ bar's light/dark appearance. An unknown name leaves the button's current icon in
 place rather than blanking it — the same rule `hotkey` follows for an unknown key.
 `title` draws text beside the symbol; empty is the icon-only default.
 
-**Removing it costs you something.** Orbit is `LSUIElement`: no Dock icon, and no
+**Removing it costs you something.** Kitsune is `LSUIElement`: no Dock icon, and no
 main menu. The status item is the only UI outside the panel, so with
 `enabled = false` the only remaining ways to reload the config or quit are:
 
 ```sh
-orbitctl reload
-orbitctl hide
-killall OrbitLauncher
+kitsunectl reload
+kitsunectl hide
+killall KitsuneLauncher
 ```
 
-Orbit raises a one-time alert saying exactly that the first time the item is
+Kitsune raises a one-time alert saying exactly that the first time the item is
 switched off, and never mentions it again.
 
 ### `palette`
@@ -450,7 +450,7 @@ Set in **`theme.lua`**, not `config.lua` — see [Theme](#theme) below.
 
 `theme.lua` returns a table of styling tokens. Layout itself is entirely
 native (AppKit), so this token set really is the whole appearance surface —
-there is no other place in Orbit a color, spacing value, or font size can come
+there is no other place in Kitsune a color, spacing value, or font size can come
 from.
 
 ### Colour
@@ -476,11 +476,11 @@ palette first, then your explicit overrides on top, which is why the shipped
 would make `palette` inert).
 
 - `palette = "auto"` follows `~/.config/theme` (the same pointer file tools
-  like `set-theme` write), so switching the system theme retints Orbit too.
-  Orbit watches that file and reloads automatically when it changes.
+  like `set-theme` write), so switching the system theme retints Kitsune too.
+  Kitsune watches that file and reloads automatically when it changes.
 - `palette = "kanagawa"` — a bare name, searched in this order:
   ```
-  ~/.config/orbit/themes/<name>.{toml,yaml,yml,conf,theme}
+  ~/.config/kitsune/themes/<name>.{toml,yaml,yml,conf,theme}
   ~/omarchy/themes/<name>/colors.toml
   ~/.config/kitty/themes/<name>.conf
   ~/.config/ghostty/themes/<name>
@@ -579,15 +579,15 @@ item whose provider drops a fresh UUID on the clipboard.
 **1. Create the file.**
 
 ```sh
-mkdir -p ~/.config/orbit/plugins
-touch ~/.config/orbit/plugins/uuid.lua
+mkdir -p ~/.config/kitsune/plugins
+touch ~/.config/kitsune/plugins/uuid.lua
 ```
 
 **2. Write the plugin.** It returns a table with `items` and `providers`, the
 same shape every plugin returns:
 
 ```lua
--- ~/.config/orbit/plugins/uuid.lua
+-- ~/.config/kitsune/plugins/uuid.lua
 
 return {
   items = {
@@ -629,7 +629,7 @@ return {
 ```
 
 The provider ignores `query` entirely — a UUID doesn't need input — but the
-signature has to accept it regardless, since Orbit always calls a provider
+signature has to accept it regardless, since Kitsune always calls a provider
 with the current query as its first argument.
 
 **3. Load the plugin from `config.lua`.** Plugins aren't auto-discovered; the
@@ -649,12 +649,12 @@ Add `"uuid"` to that list (or write your own loop — `require "plugins.uuid"`
 resolves via the `package.path` entries described above regardless of how you
 call it).
 
-**4. Save.** Orbit's file watcher picks up the change within about 80ms and
+**4. Save.** Kitsune's file watcher picks up the change within about 80ms and
 reloads `config.lua` automatically — no restart needed. Open the panel, type
 into Tools, select "Generate UUID," and press Return: the row's `applescript`
 action runs and the UUID lands on the clipboard.
 
 From here, the same shape — a category item plus a `provider` function that
 returns `{ label, detail, symbol, value, shell|applescript|open|url }` rows —
-is how every dynamic list in Orbit is built, from `plugins/brew.lua`'s
+is how every dynamic list in Kitsune is built, from `plugins/brew.lua`'s
 "install what I typed" to `plugins/projects.lua`'s per-project grep.

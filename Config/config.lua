@@ -1,5 +1,5 @@
--- OrbitLauncher config. Copy to ~/.config/orbit/config.lua.
--- Reloads on save. `~/.config/orbit` is on package.path, so this behaves like a
+-- KitsuneLauncher config. Copy to ~/.config/kitsune/config.lua.
+-- Reloads on save. `~/.config/kitsune` is on package.path, so this behaves like a
 -- Neovim config: split it up and `require` the pieces.
 --
 -- Item fields:
@@ -69,7 +69,7 @@ local items = {
   item("trigger.toggle.dnd", "Do Not Disturb", { applescript = 'tell application "System Events" to keystroke "d" using {option down, command down, control down}' }),
   item("trigger.tests", "Speed Test", { symbol = "speedometer" }),
   item("trigger.tests.network", "Network", { shell = "networkQuality" }),
-  item("trigger.tests.disk", "Disk", { shell = "time dd if=/dev/zero of=/tmp/orbit-speed-test bs=1m count=1024 conv=sync; rm -f /tmp/orbit-speed-test" }),
+  item("trigger.tests.disk", "Disk", { shell = "time dd if=/dev/zero of=/tmp/kitsune-speed-test bs=1m count=1024 conv=sync; rm -f /tmp/kitsune-speed-test" }),
 
   item("style.wallpaper", "Wallpaper", { applescript = 'tell application "System Settings" to activate\ntell application "System Events" to tell process "System Settings" to keystroke "wallpaper"' }),
   item("style.appearance", "Appearance", { url = "x-apple.systempreferences:com.apple.Appearance-Settings.extension" }),
@@ -83,8 +83,8 @@ local items = {
   item("setup.keyboard", "Keyboard", { url = "x-apple.systempreferences:com.apple.Keyboard-Settings.extension" }),
   item("setup.trackpad", "Trackpad", { url = "x-apple.systempreferences:com.apple.Trackpad-Settings.extension" }),
   item("setup.security", "Privacy & Security", { url = "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension" }),
-  item("setup.config", "Orbit Config", { shell = "${EDITOR:-nano} ~/.config/orbit/config.lua" }),
-  item("setup.theme", "Orbit Theme", { shell = "${EDITOR:-nano} ~/.config/orbit/theme.lua" }),
+  item("setup.config", "Kitsune Config", { shell = "${EDITOR:-nano} ~/.config/kitsune/config.lua" }),
+  item("setup.theme", "Kitsune Theme", { shell = "${EDITOR:-nano} ~/.config/kitsune/theme.lua" }),
 
   item("search", "Search", { symbol = "magnifyingglass", provider = "websearch", detail = "Type, then pick a destination" }),
 
@@ -128,11 +128,11 @@ local items = {
 
   item("update.homebrew", "Homebrew Packages", { shell = "brew update && brew upgrade && brew cleanup" }),
   item("update.macos", "macOS Software Update", { shell = "softwareupdate --list; echo; read -r '?Install all updates? [y/N] ' answer; [[ $answer == [Yy]* ]] && sudo softwareupdate --install --all" }),
-  item("update.orbit", "OrbitLauncher", { shell = "cd ~/personal/app_launcher && git pull && ./scripts/build-app.sh" }),
-  item("update.reload", "Reload Lua Config", { shell = "~/.config/orbit/reload 2>/dev/null || true" }),
+  item("update.kitsune", "KitsuneLauncher", { shell = "cd ~/personal/app_launcher && git pull && ./scripts/build-app.sh" }),
+  item("update.reload", "Reload Lua Config", { shell = "~/.config/kitsune/reload 2>/dev/null || true" }),
 }
 
--- Plugins. Anything in ~/.config/orbit/plugins/ that returns { items = ..., providers = ... }.
+-- Plugins. Anything in ~/.config/kitsune/plugins/ that returns { items = ..., providers = ... }.
 local providers = {
   -- A provider is called with the current query and returns rows. It runs in an
   -- isolated state with no terminal/osascript/io, on a 0.15s budget, so it must be a
@@ -161,7 +161,7 @@ end
 return {
   -- Global chords. Each one either toggles the panel (optionally at a `route`) or
   -- fires a node outright with `invoke`, never showing the panel at all. A chord
-  -- Orbit cannot bind costs only its own line: the rest stay bound, and the one
+  -- Kitsune cannot bind costs only its own line: the rest stay bound, and the one
   -- that failed keeps whatever it had.
   hotkeys = {
     { key = "space", mods = { "option" } },                     -- toggle the root menu
@@ -204,14 +204,14 @@ return {
   -- Arrow keys keep working in both modes.
   vim = false,
 
-  -- Start Orbit at login. Off by default: registering with launchd is a thing to
+  -- Start Kitsune at login. Off by default: registering with launchd is a thing to
   -- opt into. It can also be toggled from the menu bar, and this value wins the
   -- next time the config is saved. Only works from the built .app bundle.
   login_item = false,
 
   -- The menu bar item. `menu_bar = false` removes it entirely -- but the app has no
   -- Dock icon either, so with it gone the only ways left to reload or quit are
-  -- `orbitctl` and `kill`. Orbit says so once, the first time you switch it off.
+  -- `kitsunectl` and `kill`. Kitsune says so once, the first time you switch it off.
   -- `symbol` is any SF Symbol; an unknown name leaves the current icon alone.
   -- `title` draws text beside it, and is empty for the icon-only default.
   menu_bar = { enabled = true, symbol = "circle.dashed", title = "" },

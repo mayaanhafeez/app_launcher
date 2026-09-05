@@ -47,8 +47,8 @@ jobs:
       - name: Verify the bundle
         run: |
           set -euo pipefail
-          APP=".build/OrbitLauncher.app"
-          test -x "$APP/Contents/MacOS/OrbitLauncher"
+          APP=".build/KitsuneLauncher.app"
+          test -x "$APP/Contents/MacOS/KitsuneLauncher"
 
           # Proves fetch-depth: 0 took effect, so the version below is real.
           test "$(git rev-parse --is-shallow-repository)" = "false"

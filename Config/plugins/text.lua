@@ -33,7 +33,7 @@ return {
           rows[#rows + 1] = {
             label = text, detail = label, symbol = symbol, value = label,
             applescript = 'set the clipboard to "' .. asquote(text) .. '"\n'
-              .. 'display notification "Copied" with title "Orbit"',
+              .. 'display notification "Copied" with title "Kitsune"',
           }
         end
       end

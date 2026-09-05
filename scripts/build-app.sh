@@ -3,10 +3,10 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 swift build -c release --package-path "$ROOT"
-APP="$ROOT/.build/OrbitLauncher.app"
+APP="$ROOT/.build/KitsuneLauncher.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$ROOT/.build/release/OrbitLauncher" "$APP/Contents/MacOS/OrbitLauncher"
+cp "$ROOT/.build/release/KitsuneLauncher" "$APP/Contents/MacOS/KitsuneLauncher"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 
 # Version stamping: derived from git, never hand-edited into the checked-in
@@ -26,6 +26,12 @@ ICONSET="$ROOT/Resources/AppIcon.iconset"
 if [ -d "$ICONSET" ]; then
   iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 fi
+
+# Menu bar glyph: a template image (black + alpha), which the status item loads
+# by name at runtime and macOS retints for the light and dark menu bar.
+for TEMPLATE in "$ROOT"/Resources/MenuBarIconTemplate*.png; do
+  [ -f "$TEMPLATE" ] && cp "$TEMPLATE" "$APP/Contents/Resources/"
+done
 
 # Sign last: any edit to the bundle's contents after signing invalidates the
 # signature, so the plist and icon must land before codesign runs.
