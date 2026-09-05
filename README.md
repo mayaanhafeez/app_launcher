@@ -8,6 +8,10 @@ providers, and system actions, all fuzzy-searchable from one field.
 | --- | --- |
 | ![Kitsune launcher](docs/kitsune-demo.jpg) | ![Kitsune search](docs/kitsune-search-demo.jpg) |
 
+| Pink theme | Pink theme apps |
+| --- | --- |
+| ![Kitsune pink theme](docs/kitsune-pink-theme.jpg) | ![Kitsune pink theme apps](docs/kitsune-pink-theme-apps.jpg) |
+
 The split that makes Kitsune hackable: **AppKit owns everything native — the panel,
 rendering, the app index, fuzzy matching, navigation, the hotkey and IPC — and an
 embedded Lua 5.4 runtime owns the data: the menu tree, actions, providers, plugins and
