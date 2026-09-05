@@ -7,7 +7,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let runtime = LuaRuntime()
     private let themeRuntime = ThemeRuntime()
     private let usage = UsageStore(url: UsageStore.defaultURL)
-    private lazy var menu = MenuController(appIndex: appIndex, runtime: runtime, usage: usage)
+    private let clipboard = ClipboardHistory(url: ClipboardHistory.defaultURL)
+    private lazy var menu = MenuController(appIndex: appIndex, runtime: runtime, usage: usage, clipboard: clipboard)
     private let panel = PanelController()
     private var hotKey: GlobalHotKey?
     private var watcher: ConfigWatcher?
@@ -43,6 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             usage.spec = settings.ranking
             panel.shortcuts = settings.shortcuts
             appIndex.apply(scan: settings.apps)
+            menu.clipboardSpec = settings.clipboard
             watcher?.setDebounce(settings.watchDebounce)
             themePointerWatcher?.setDebounce(settings.watchDebounce)
             if appliedLoginItem != settings.loginItem {

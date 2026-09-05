@@ -121,3 +121,51 @@ import Testing
     #expect(load.settings?.commands.login == false)
     #expect(load.settings?.commands.shell == "/bin/sh")
 }
+
+@Test func clipboardBlockDecodes() async {
+    let (runtime, load, directory) = await orbitLoadConfig("""
+    return {
+      clipboard = { enabled = true, limit = 25, poll_interval = 0.5, persist = true },
+      items = { { id = "root", label = "Go" } },
+    }
+    """)
+    defer { orbitRemove(directory); _ = runtime }
+
+    #expect(load.settings?.clipboard.enabled == true)
+    #expect(load.settings?.clipboard.limit == 25)
+    #expect(load.settings?.clipboard.pollInterval == 0.5)
+    #expect(load.settings?.clipboard.persist == true)
+}
+
+// Recording everything a user copies, and writing it to disk, are both things to be
+// asked for rather than defaulted into.
+@Test func clipboardIsOffAndEphemeralByDefault() async {
+    let (runtime, load, directory) = await orbitLoadConfig("""
+    return { items = { { id = "root", label = "Go" } } }
+    """)
+    defer { orbitRemove(directory); _ = runtime }
+
+    #expect(load.settings?.clipboard.enabled == false)
+    #expect(load.settings?.clipboard.persist == false)
+    #expect(load.settings?.clipboard.limit == ClipboardSpec().limit)
+}
+
+// `enabled = true` alone must not drag persistence along with it.
+@Test func enablingTheClipboardDoesNotEnablePersistence() async {
+    let (runtime, load, directory) = await orbitLoadConfig("""
+    return { clipboard = true, items = { { id = "root", label = "Go" } } }
+    """)
+    defer { orbitRemove(directory); _ = runtime }
+
+    #expect(load.settings?.clipboard.enabled == true)
+    #expect(load.settings?.clipboard.persist == false)
+}
+
+// A poll interval of zero would spin the main queue for the life of the process.
+@Test func theClipboardPollIntervalIsFloored() async {
+    let (runtime, load, directory) = await orbitLoadConfig("""
+    return { clipboard = { poll_interval = 0 }, items = { { id = "root", label = "Go" } } }
+    """)
+    defer { orbitRemove(directory); _ = runtime }
+    #expect(load.settings?.clipboard.pollInterval == 0.1)
+}
