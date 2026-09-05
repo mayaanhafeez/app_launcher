@@ -12,6 +12,10 @@ providers, and system actions, all fuzzy-searchable from one field.
 | --- | --- |
 | ![Kitsune pink theme](docs/kitsune-pink-theme.jpg) | ![Kitsune pink theme apps](docs/kitsune-pink-theme-apps.jpg) |
 
+| Rose Pine Moon | Rose Pine Moon apps |
+| --- | --- |
+| ![Kitsune Rose Pine Moon theme](docs/kitsune-rose-pine-moon-theme.jpg) | ![Kitsune Rose Pine Moon theme apps](docs/kitsune-rose-pine-moon-theme-apps.jpg) |
+
 The split that makes Kitsune hackable: **AppKit owns everything native — the panel,
 rendering, the app index, fuzzy matching, navigation, the hotkey and IPC — and an
 embedded Lua 5.4 runtime owns the data: the menu tree, actions, providers, plugins and
