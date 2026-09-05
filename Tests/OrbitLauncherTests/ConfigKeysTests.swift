@@ -122,6 +122,55 @@ import Testing
     #expect(load.settings?.commands.shell == "/bin/sh")
 }
 
+@Test func menuBarBlockDecodes() async {
+    let (runtime, load, directory) = await orbitLoadConfig("""
+    return {
+      menu_bar = { enabled = true, symbol = "bolt.fill", title = "Orbit" },
+      items = { { id = "root", label = "Go" } },
+    }
+    """)
+    defer { orbitRemove(directory); _ = runtime }
+
+    #expect(load.settings?.menuBar.enabled == true)
+    #expect(load.settings?.menuBar.symbol == "bolt.fill")
+    #expect(load.settings?.menuBar.title == "Orbit")
+}
+
+@Test func menuBarFalseRemovesTheStatusItem() async {
+    let (runtime, load, directory) = await orbitLoadConfig("""
+    return { menu_bar = false, items = { { id = "root", label = "Go" } } }
+    """)
+    defer { orbitRemove(directory); _ = runtime }
+
+    #expect(load.settings?.menuBar.enabled == false)
+    // The short form must leave the rest of the spec alone, so re-enabling it later
+    // does not need the symbol and title restated.
+    #expect(load.settings?.menuBar.symbol == MenuBarSpec().symbol)
+    #expect(load.settings?.menuBar.title == MenuBarSpec().title)
+}
+
+@Test func absentMenuBarKeysKeepTheirDefaults() async {
+    let (runtime, load, directory) = await orbitLoadConfig("""
+    return { menu_bar = { title = "Orbit" }, items = { { id = "root", label = "Go" } } }
+    """)
+    defer { orbitRemove(directory); _ = runtime }
+
+    // Present by default: the status item is the only way to reload or quit.
+    #expect(load.settings?.menuBar.enabled == true)
+    #expect(load.settings?.menuBar.symbol == MenuBarSpec().symbol)
+    #expect(load.settings?.menuBar.title == "Orbit")
+}
+
+// An empty `symbol` would blank the button and leave nothing to click, so it is
+// treated as absent — the same rule `back.label` follows.
+@Test func blankMenuBarSymbolKeepsTheDefault() async {
+    let (runtime, load, directory) = await orbitLoadConfig("""
+    return { menu_bar = { symbol = "" }, items = { { id = "root", label = "Go" } } }
+    """)
+    defer { orbitRemove(directory); _ = runtime }
+    #expect(load.settings?.menuBar.symbol == MenuBarSpec().symbol)
+}
+
 @Test func clipboardBlockDecodes() async {
     let (runtime, load, directory) = await orbitLoadConfig("""
     return {
