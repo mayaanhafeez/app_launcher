@@ -31,8 +31,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         reloadAll()
         appIndex.start()
         let hotKey = GlobalHotKey()
-        hotKey.action = { [weak self] in self?.toggle(route: "root") }
-        hotKey.register(HotKeySpec())
+        hotKey.action = { [weak self] target in self?.trigger(target) }
+        hotKey.register([HotKeySpec()])
         self.hotKey = hotKey
         startWatcher()
         startIPC()
@@ -61,8 +61,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 appliedLoginItem = settings.loginItem
                 setLoginItem(settings.loginItem)
             }
-            if hotKey?.register(settings.hotKey) == false {
-                panel.showNotice("Unknown hotkey: \(settings.hotKey.key)")
+            // Only the chords that failed are named — the rest are bound, and saying
+            // otherwise would send the user hunting through a config that is fine.
+            if let rejected = hotKey?.register(settings.hotKeys), !rejected.isEmpty {
+                panel.showNotice("Hotkey unavailable: " + rejected.map(\.chord).joined(separator: ", "))
             }
         }
         menu.onRows = { [weak panel] title, rows in panel?.update(title: title, rows: rows) }
@@ -196,6 +198,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let short = info?["CFBundleShortVersionString"] as? String else { return "unbundled" }
         let build = info?["CFBundleVersion"] as? String ?? "0"
         return "\(short) (\(build))"
+    }
+
+    /// What a chord does. `invoke` never shows the panel, which is the point of it —
+    /// so a failure has to be logged as well as noticed, or it is silent.
+    private func trigger(_ target: HotKeyTarget) {
+        switch target {
+        case .toggle(let route): toggle(route: route)
+        case .invoke(let id):
+            guard !menu.invoke(id: id) else { return }
+            NSLog("orbit: hotkey could not invoke unknown or non-actionable node \(id)")
+            panel.showNotice("Hotkey target not found: \(id)")
+        }
     }
 
     private func toggle(route: String) { panel.window?.isVisible == true ? dismiss() : show(route: route) }

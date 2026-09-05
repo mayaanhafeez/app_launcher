@@ -1,3 +1,4 @@
+import AppKit
 import Carbon
 import Foundation
 import Testing
@@ -48,30 +49,118 @@ import Testing
     #expect(GlobalHotKey.modifierMask(for: ["meta", "control"]) == UInt32(controlKey))
 }
 
+// MARK: - Several chords at once
+
+@Test func hotKeysListDecodesTargets() async {
+    let (runtime, load, directory) = await orbitLoadConfig("""
+    return {
+      hotkeys = {
+        { key = "space", mods = { "option" } },
+        { key = "t", mods = { "option" }, route = "tools" },
+        { key = "l", mods = { "option" }, invoke = "system.lock" },
+      },
+      items = { { id = "root", label = "Go" } },
+    }
+    """)
+    defer { orbitRemove(directory); _ = runtime }
+
+    #expect(load.settings?.hotKeys == [
+        HotKeySpec(key: "space", modifiers: ["option"], target: .toggle("root")),
+        HotKeySpec(key: "t", modifiers: ["option"], target: .toggle("tools")),
+        HotKeySpec(key: "l", modifiers: ["option"], target: .invoke("system.lock")),
+    ])
+}
+
+// `invoke` is the more specific statement of intent, so a config that sets both
+// plainly meant the action rather than the menu.
+@Test func invokeWinsOverRouteOnTheSameChord() async {
+    let (runtime, load, directory) = await orbitLoadConfig("""
+    return {
+      hotkeys = { { key = "l", mods = { "option" }, route = "tools", invoke = "system.lock" } },
+      items = { { id = "root", label = "Go" } },
+    }
+    """)
+    defer { orbitRemove(directory); _ = runtime }
+    #expect(load.settings?.hotKeys.first?.target == .invoke("system.lock"))
+}
+
+// The whole point of keeping the alias: a config written before `hotkeys` existed
+// must keep binding exactly what it always did.
+@Test func theSingleHotkeyAliasStillWorksAndLosesToTheList() async {
+    let (runtime, load, directory) = await orbitLoadConfig("""
+    return {
+      hotkey = { key = "j", mods = { "control" } },
+      hotkeys = { { key = "k", mods = { "command" } } },
+      items = { { id = "root", label = "Go" } },
+    }
+    """)
+    defer { orbitRemove(directory); _ = runtime }
+    #expect(load.settings?.hotKeys == [HotKeySpec(key: "k", modifiers: ["command"])])
+}
+
+// An empty list would otherwise leave the launcher with no way to open at all.
+@Test func anEmptyHotkeysListKeepsTheDefaultBinding() async {
+    let (runtime, load, directory) = await orbitLoadConfig("""
+    return { hotkeys = {}, items = { { id = "root", label = "Go" } } }
+    """)
+    defer { orbitRemove(directory); _ = runtime }
+    #expect(load.settings?.hotKeys == [HotKeySpec()])
+}
+
+// Name validation needs no system claim at all, so this half is unconditional: a
+// chord the map cannot resolve is rejected before anything is registered.
 @MainActor
-@Test func unknownHotKeyNameKeepsThePreviousBinding() {
+@Test func anUnknownKeyNameIsRejectedBeforeAnythingIsBound() {
     let hotKey = GlobalHotKey()
-    #expect(hotKey.current == nil)
+    #expect(hotKey.current.isEmpty)
+    let rejected = hotKey.register([HotKeySpec(key: "hyperspace", modifiers: ["option"])])
+    #expect(rejected.map(\.key) == ["hyperspace"])
+    #expect(hotKey.current.isEmpty)
+}
 
-    // An obscure chord: this registers system-wide for the test process, so it must
-    // not be one a developer (or the launcher itself) is likely to be holding.
-    let spec = HotKeySpec(key: "grave", modifiers: ["control", "option", "shift", "command"])
-    let registered = hotKey.register(spec)
+// The per-slot fallback, which is the reason this is a registry and not a list: one
+// bad line in config.lua costs its own chord and nothing else.
+//
+// Guarded, because registering is a system-wide claim another process may already
+// hold — the unconditional half of the rule is asserted above.
+@MainActor
+@Test func aRejectedChordCostsOnlyItsOwnSlot() {
+    let hotKey = GlobalHotKey()
+    // Obscure chords: these register system-wide for the test process, so they must
+    // not be ones a developer — or the launcher itself — is likely to be holding.
+    let first = HotKeySpec(key: "grave", modifiers: ["control", "option", "shift", "command"])
+    let second = HotKeySpec(key: "semicolon", modifiers: ["control", "option", "shift", "command"])
+    guard hotKey.register([first, second]).isEmpty else { return }
     let established = hotKey.current
+    #expect(established == [first, second])
 
-    // The config path that matters: a reload naming a key the map doesn't know is
-    // rejected, and the binding already in place survives it. Otherwise a typo in
-    // config.lua leaves the launcher with no way to open.
-    #expect(!hotKey.register(HotKeySpec(key: "hyperspace", modifiers: ["option"])))
+    // A typo in slot 0 is rejected by name, before anything is torn down...
+    #expect(hotKey.register([HotKeySpec(key: "hyperspace", modifiers: ["option"]), second]).map(\.key) == ["hyperspace"])
+    // ...and every slot, including the one that failed, keeps what it had.
     #expect(hotKey.current == established)
 
-    // Guarded because registration is a system-wide claim that another process can
-    // already hold; the rejection above is asserted either way.
-    if registered {
-        #expect(established == spec)
-        // Re-registering the identical spec is a no-op that still reports success,
-        // which is what stops every unrelated config save from churning the binding.
-        #expect(hotKey.register(spec))
-        #expect(hotKey.current == spec)
-    }
+    // Re-registering the identical set is a no-op that reports no failures, which is
+    // what stops an unrelated config save from churning every binding.
+    #expect(hotKey.register(established).isEmpty)
+    #expect(hotKey.current == established)
+}
+
+// Dropping a chord from the config has to unregister it, not leave it bound.
+@MainActor
+@Test func shrinkingTheSetReleasesTheChordsItDropped() {
+    let hotKey = GlobalHotKey()
+    let first = HotKeySpec(key: "grave", modifiers: ["control", "option", "shift", "command"])
+    let second = HotKeySpec(key: "slash", modifiers: ["control", "option", "shift", "command"])
+    guard hotKey.register([first, second]).isEmpty else { return }
+
+    #expect(hotKey.register([first]).isEmpty)
+    #expect(hotKey.current == [first])
+    // The chord `second` held is free again, so claiming it in a fresh slot succeeds.
+    #expect(hotKey.register([first, second]).isEmpty)
+    #expect(hotKey.current == [first, second])
+}
+
+@Test func aChordReadsBackAsTheUserWroteIt() {
+    #expect(HotKeySpec(key: "space", modifiers: ["option"]).chord == "option+space")
+    #expect(HotKeySpec(key: "k", modifiers: ["command", "shift"]).chord == "command+shift+k")
 }

@@ -319,6 +319,24 @@ Routes resolve through `MenuController.node(matching:)`: an exact id wins over a
 underscores normalise to dashes. Unknown routes silently resolve to `root`; `invoke` on a category
 or unknown id returns `ok: false`.
 
-The global hotkey is re-registered from `config.lua` on every reload. `GlobalHotKey.register`
-returns `false` for an unknown key name and keeps the previous binding rather than leaving the
-launcher with no way to open.
+### Global hotkeys
+
+`GlobalHotKey` is a **registry**, not a binding: `bindings` is keyed by slot — a chord's index in `config.lua` — and
+`register(_:)` takes the whole set, adding, replacing and dropping per slot on each reload. One binding never had to ask
+which chord fired; several do, so the Carbon callback now pulls the `EventHotKeyID` off the event with
+`GetEventParameter` and dispatches on its `id`.
+
+A rejected chord costs **only its own slot**, which is the point of the registry: all-or-nothing was tolerable when
+there was one binding and is not once there are several. An unknown key name is caught by `keyCode(for:)` *before*
+anything is unregistered, so a typo cannot cost a working binding; a chord that is valid but already held system-wide
+fails at `RegisterEventHotKey`, and the slot's previous spec is re-claimed. `register` returns the specs it could not
+bind so `AppDelegate` names those and only those. An unchanged spec keeps the registration it already holds, so an
+unrelated config save doesn't churn the set.
+
+`HotKeySpec.target` is a `HotKeyTarget`: `.toggle(route)` opens the panel (`"root"` being the historical behaviour), and
+`.invoke(id)` fires a node through `MenuController.invoke(id:)` — the same entry point `orbitctl invoke` uses — with no
+panel at all. Because an `invoke` chord shows nothing, a failure is `NSLog`ed as well as noticed, or it is silent.
+
+`hotkeys = { ... }` is the list; `hotkey = { ... }` stays a single-entry alias decoded by the same `decodeHotKey`, and
+`hotkeys` wins when both are present. An empty list leaves the default binding rather than leaving the launcher with no
+way to open.
