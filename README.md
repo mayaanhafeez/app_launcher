@@ -4,10 +4,9 @@ Orbit is a resident macOS launcher: a warm, borderless command panel that opens 
 global hotkey, in the shape of the Omarchy menu — apps, a nested command tree, search
 providers, and system actions, all fuzzy-searchable from one field.
 
-![Orbit screenshot](docs/screenshot.png)
-
-<!-- TODO: capture and add docs/screenshot.png — the panel open over a desktop, showing
-     a few rows with icons/details, ideally with a themed palette applied. -->
+| Launcher | Search |
+| --- | --- |
+| ![Orbit launcher](docs/kitsune-demo.jpg) | ![Orbit search](docs/kitsune-search-demo.jpg) |
 
 The split that makes Orbit hackable: **AppKit owns everything native — the panel,
 rendering, the app index, fuzzy matching, navigation, the hotkey and IPC — and an
