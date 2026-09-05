@@ -79,7 +79,9 @@ project doesn't have one.
 
 The default hotkey is **Option-Space**. Press it to open the panel, type to fuzzy
 search, arrow keys or `j`/`k` (in [vim mode](docs/configuration.md#settings)) to move,
-Return to activate, Escape to go back a level or dismiss.
+Return to activate, Escape to go back a level or dismiss. **Tab** (or ⌘-Return) on the
+selected row opens its [actions](docs/configuration.md#row-actions) — Reveal in Finder,
+Copy Path, Open With… — and Escape returns to the list with your query intact.
 
 Orbit has no Dock icon or window outside the panel itself; the only persistent UI is
 a **menu bar item** (a dashed-circle glyph) with:

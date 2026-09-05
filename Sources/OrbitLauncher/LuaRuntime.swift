@@ -354,6 +354,36 @@ final class LuaRuntime: @unchecked Sendable {
         }
         lua_settop(state, -2)
 
+        // `menu_bar = false` removes the status item; the table form restyles it.
+        // Decoded before `hotkey`, whose guard returns early.
+        lua_getfield(state, -1, "menu_bar")
+        if lua_type(state, -1) == LUA_TBOOLEAN {
+            settings.menuBar.enabled = lua_toboolean(state, -1) != 0
+        } else if lua_type(state, -1) == LUA_TTABLE {
+            func field(_ name: String) -> String? {
+                lua_getfield(state, -1, name); defer { lua_settop(state, -2) }; return luaString(state, -1)
+            }
+            lua_getfield(state, -1, "enabled")
+            if lua_type(state, -1) == LUA_TBOOLEAN { settings.menuBar.enabled = lua_toboolean(state, -1) != 0 }
+            lua_settop(state, -2)
+            if let symbol = field("symbol"), !symbol.isEmpty { settings.menuBar.symbol = symbol }
+            if let title = field("title") { settings.menuBar.title = title }
+        }
+        lua_settop(state, -2)
+
+        // `clipboard = false` is the default in all but name; the table form turns it
+        // on and tunes it. Decoded before `hotkey`, whose guard returns early.
+        lua_getfield(state, -1, "clipboard")
+        if lua_type(state, -1) == LUA_TBOOLEAN {
+            settings.clipboard.enabled = lua_toboolean(state, -1) != 0
+        } else if lua_type(state, -1) == LUA_TTABLE {
+            if let enabled = boolean(state, field: "enabled") { settings.clipboard.enabled = enabled }
+            if let value = number(state, field: "limit") { settings.clipboard.limit = max(1, Int(value)) }
+            if let value = number(state, field: "poll_interval") { settings.clipboard.pollInterval = max(0.1, value) }
+            if let persist = boolean(state, field: "persist") { settings.clipboard.persist = persist }
+        }
+        lua_settop(state, -2)
+
         // A list of chords, each of which may open a route or fire a node outright.
         // `hotkey = { ... }` below stays a single-entry alias so a config written
         // before this existed keeps working; an explicit `hotkeys` wins over it.
