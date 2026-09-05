@@ -224,13 +224,46 @@ as data, they don't hand back closures. A row with none of `shell`,
 These are top-level keys in the table `config.lua` returns (except `palette`,
 which lives in `theme.lua` — see [Theme](#theme)).
 
+### `hotkeys`
+
+```lua
+hotkeys = {
+  { key = "space", mods = { "option" } },                       -- toggle the root menu
+  { key = "t", mods = { "option" }, route = "tools" },          -- open a submenu directly
+  { key = "l", mods = { "option" }, invoke = "system.lock" },   -- run a node, no panel
+},
+```
+
+Every global chord Orbit binds. Each entry does one of three things:
+
+| Entry | Effect |
+|---|---|
+| neither `route` nor `invoke` | Toggles the panel at the root menu — the default, and what a single `hotkey` has always done |
+| `route = "id"` | Toggles the panel already inside that submenu. Resolves like `orbitctl show`: exact id first, then aliases |
+| `invoke = "id"` | Fires that node's action **without ever showing the panel**, through the same path as `orbitctl invoke` |
+
+`invoke` wins if an entry sets both. A node that is a category, or an id that
+matches nothing, can't be invoked — Orbit logs it and shows a notice.
+
+Registration is per slot, so **a chord Orbit cannot bind costs only its own
+line**: every other entry stays bound, and the failed slot keeps whatever it had
+before. A chord can fail either because `key` isn't a name Orbit knows, or
+because another application already holds it system-wide; the notice names the
+chords that failed and nothing else. An empty `hotkeys = {}` leaves the default
+binding in place rather than leaving you with no way to open the launcher.
+
 ### `hotkey`
 
 ```lua
 hotkey = { key = "space", mods = { "option" } },
 ```
 
-The global hotkey that opens the panel. Defaults to Option-Space. `key` accepts
+The original single-chord form, kept working as a one-entry alias for `hotkeys`
+so configs written before the list existed are unaffected. It takes the same
+fields, `route` and `invoke` included. If both keys are present, `hotkeys` wins
+and this is ignored.
+
+Defaults to Option-Space. `key` accepts
 a single letter or digit, or one of: `space`, `return`/`enter`, `tab`,
 `escape`/`esc`, `delete`/`backspace`, `left`, `right`, `up`, `down`, `home`,
 `end`, `pageup`, `pagedown`, `grave`/`backtick`, `period`, `comma`, `slash`,

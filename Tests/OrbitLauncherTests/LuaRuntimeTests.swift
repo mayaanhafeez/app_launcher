@@ -14,7 +14,7 @@ import Testing
     #expect(load.nodes.map(\.id) == ["root", "apps", "system", "tools"])
     // A machine with no config still gets a working panel, so the defaults have to
     // arrive alongside the nodes rather than being left unpublished.
-    #expect(load.settings?.hotKey == HotKeySpec())
+    #expect(load.settings?.hotKeys == [HotKeySpec()])
     #expect(load.settings?.vimMode == false)
 }
 
@@ -104,7 +104,8 @@ import Testing
     defer { orbitRemove(directory); _ = runtime }
 
     let settings = load.settings
-    #expect(settings?.hotKey == HotKeySpec(key: "k", modifiers: ["command", "shift"]))
+    // The single-entry alias still decodes, into a one-element list.
+    #expect(settings?.hotKeys == [HotKeySpec(key: "k", modifiers: ["command", "shift"])])
     #expect(settings?.vimMode == true)
     #expect(settings?.loginItem == true)
     #expect(settings?.back == BackRowSpec(enabled: true, label: "Up", symbol: "arrow.up", detail: "leave", position: "bottom"))
@@ -134,7 +135,7 @@ import Testing
     // A depth of 0 would scan nothing at all, so it is clamped rather than honoured.
     #expect(settings?.apps.depth == 1)
     // An absent `hotkey` must leave the binding alone, not blank it.
-    #expect(settings?.hotKey == HotKeySpec())
+    #expect(settings?.hotKeys == [HotKeySpec()])
     #expect(settings?.apps.paths == [])
 }
 

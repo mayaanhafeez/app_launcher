@@ -354,14 +354,54 @@ final class LuaRuntime: @unchecked Sendable {
         }
         lua_settop(state, -2)
 
+        // A list of chords, each of which may open a route or fire a node outright.
+        // `hotkey = { ... }` below stays a single-entry alias so a config written
+        // before this existed keeps working; an explicit `hotkeys` wins over it.
+        var sawList = false
+        lua_getfield(state, -1, "hotkeys")
+        if lua_type(state, -1) == LUA_TTABLE {
+            var specs: [HotKeySpec] = []
+            let count = Int(lua_rawlen(state, -1))
+            if count > 0 {
+                for index in 1...count {
+                    lua_rawgeti(state, -1, lua_Integer(index))
+                    if lua_type(state, -1) == LUA_TTABLE { specs.append(decodeHotKey(state)) }
+                    lua_settop(state, -2)
+                }
+            }
+            // An empty or malformed list leaves the default binding alone rather than
+            // leaving the launcher with no way to open at all.
+            if !specs.isEmpty { settings.hotKeys = specs; sawList = true }
+        }
+        lua_settop(state, -2)
+
         lua_getfield(state, -1, "hotkey")
         defer { lua_settop(state, -2) }
-        guard lua_type(state, -1) == LUA_TTABLE else { return settings }
-        lua_getfield(state, -1, "key")
-        if let key = luaString(state, -1), !key.isEmpty { settings.hotKey.key = key }
-        lua_settop(state, -2)
-        if let mods = stringList(state, field: "mods") { settings.hotKey.modifiers = mods }
+        guard !sawList, lua_type(state, -1) == LUA_TTABLE else { return settings }
+        settings.hotKeys = [decodeHotKey(state)]
         return settings
+    }
+
+    /// One chord, from a table already on top of the stack. Shared by `hotkeys` and by
+    /// the `hotkey` alias, so both accept exactly the same fields.
+    private static func decodeHotKey(_ state: OpaquePointer) -> HotKeySpec {
+        var spec = HotKeySpec()
+        lua_getfield(state, -1, "key")
+        if let key = luaString(state, -1), !key.isEmpty { spec.key = key }
+        lua_settop(state, -2)
+        if let mods = stringList(state, field: "mods") { spec.modifiers = mods }
+
+        lua_getfield(state, -1, "invoke")
+        let invoke = luaString(state, -1)
+        lua_settop(state, -2)
+        lua_getfield(state, -1, "route")
+        let route = luaString(state, -1)
+        lua_settop(state, -2)
+        // `invoke` wins over `route`: it is the more specific statement of intent, and
+        // a config that set both plainly meant the action rather than the menu.
+        if let invoke, !invoke.isEmpty { spec.target = .invoke(invoke) }
+        else if let route, !route.isEmpty { spec.target = .toggle(route) }
+        return spec
     }
 
     /// The number under `field` on the table at the top of the stack. Nil for a

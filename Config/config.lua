@@ -159,7 +159,19 @@ for _, name in ipairs({ "example", "smart", "text", "projects", "themes", "brew"
 end
 
 return {
-  hotkey = { key = "space", mods = { "option" } },
+  -- Global chords. Each one either toggles the panel (optionally at a `route`) or
+  -- fires a node outright with `invoke`, never showing the panel at all. A chord
+  -- Orbit cannot bind costs only its own line: the rest stay bound, and the one
+  -- that failed keeps whatever it had.
+  hotkeys = {
+    { key = "space", mods = { "option" } },                     -- toggle the root menu
+    -- { key = "t", mods = { "option" }, route = "tools" },      -- open a submenu directly
+    -- { key = "l", mods = { "option" }, invoke = "system.lock" }, -- run a node, no panel
+  },
+
+  -- Still accepted, as a single-entry alias for the above. `hotkeys` wins if both
+  -- are present.
+  -- hotkey = { key = "space", mods = { "option" } },
 
   -- The row that leaves a submenu. It is never shown at root, is skipped when the
   -- selection lands on the first row, and survives every query. `back = false`

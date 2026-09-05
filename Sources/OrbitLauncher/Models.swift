@@ -116,10 +116,25 @@ struct AppEntry: @unchecked Sendable {
     let icon: NSImage
 }
 
-/// Global hotkey, configurable from `config.lua`.
+/// What a chord does when it fires. A hotkey that only ever opened the root menu is
+/// a launcher shortcut; one that can open a route, or run a node without showing
+/// anything at all, is a keybinding daemon.
+enum HotKeyTarget: Sendable, Equatable {
+    /// Toggle the panel at a route. `"root"` is the historical behaviour.
+    case toggle(String)
+    /// Fire a node's action directly, with no panel. Resolved through
+    /// `MenuController.invoke(id:)`, the same entry point `orbitctl invoke` uses.
+    case invoke(String)
+}
+
+/// One global chord, configurable from `config.lua`.
 struct HotKeySpec: Sendable, Equatable {
     var key: String = "space"
     var modifiers: [String] = ["option"]
+    var target: HotKeyTarget = .toggle("root")
+
+    /// The chord as a user wrote it, for a notice naming the one that failed.
+    var chord: String { (modifiers + [key]).joined(separator: "+") }
 }
 
 /// The row that leaves a submenu, configured by `back = { ... }` in config.lua.
@@ -271,7 +286,9 @@ struct ProviderSpec: Sendable, Equatable {
 }
 
 struct Settings: Sendable {
-    var hotKey = HotKeySpec()
+    /// Every bound chord. A single-element list is the default, and `hotkey = { ... }`
+    /// still decodes into one, so a config written before this existed is unaffected.
+    var hotKeys: [HotKeySpec] = [HotKeySpec()]
     var ranking = RankingSpec()
     var search = SearchSpec()
     var providers = ProviderSpec()

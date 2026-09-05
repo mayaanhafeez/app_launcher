@@ -71,14 +71,25 @@ final class MenuBarItem: NSObject, NSMenuDelegate {
     @objc private func quit() { NSApp.terminate(nil) }
 }
 
+/// Every global chord the launcher holds, as a set. A slot is a position in the
+/// configured list, and registrations are added, replaced and dropped per slot on
+/// each reload — an all-or-nothing fallback is too coarse once there is more than
+/// one binding to lose.
 @MainActor
 final class GlobalHotKey {
-    private var reference: EventHotKeyRef?
+    private struct Binding {
+        let spec: HotKeySpec
+        let reference: EventHotKeyRef
+    }
+
+    /// Keyed by slot, which is the chord's index in `config.lua`.
+    private var bindings: [UInt32: Binding] = [:]
     private var handler: EventHandlerRef?
-    /// Readable so a test can assert that a rejected key name leaves the previous
-    /// binding in place rather than clearing it.
-    private(set) var current: HotKeySpec?
-    var action: (() -> Void)?
+    /// What is actually registered right now, in slot order. Readable so a test can
+    /// assert that a rejected key name leaves the previous binding in place rather
+    /// than clearing it.
+    private(set) var current: [HotKeySpec] = []
+    var action: ((HotKeyTarget) -> Void)?
 
     /// Key names accepted in `config.lua`. Letters and digits resolve on their own.
     nonisolated private static let namedKeys: [String: Int] = [
@@ -122,30 +133,88 @@ final class GlobalHotKey {
         }
     }
 
+    nonisolated private static let signature = OSType(0x4f524254)
+
     init() {
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-        let callback: EventHandlerUPP = { _, _, userData in
-            guard let userData else { return noErr }
+        // The event carries which chord fired, which one binding never had to ask.
+        let callback: EventHandlerUPP = { _, event, userData in
+            guard let userData, let event else { return noErr }
+            var id = EventHotKeyID()
+            let status = GetEventParameter(event, EventParamName(kEventParamDirectObject),
+                                           EventParamType(typeEventHotKeyID), nil,
+                                           MemoryLayout<EventHotKeyID>.size, nil, &id)
+            guard status == noErr, id.signature == GlobalHotKey.signature else { return noErr }
             let owner = Unmanaged<GlobalHotKey>.fromOpaque(userData).takeUnretainedValue()
-            Task { @MainActor in owner.action?() }
+            let slot = id.id
+            Task { @MainActor in owner.fire(slot: slot) }
             return noErr
         }
         InstallEventHandler(GetApplicationEventTarget(), callback, 1, &spec, Unmanaged.passUnretained(self).toOpaque(), &handler)
     }
 
-    /// Re-registers on config reload. An unknown key name keeps the previous binding
-    /// rather than leaving the launcher with no way to open.
+    private func fire(slot: UInt32) {
+        guard let binding = bindings[slot] else { return }
+        action?(binding.spec.target)
+    }
+
+    /// Re-registers the whole set on config reload, and returns the specs it could not
+    /// bind so the caller can name them. A rejected chord costs only its own slot: the
+    /// binding already in that slot survives, because a typo in one line of
+    /// `config.lua` must not take away the chord that opens the launcher.
     @discardableResult
-    func register(_ spec: HotKeySpec) -> Bool {
-        guard spec != current else { return true }
-        guard let code = Self.keyCode(for: spec.key) else { return false }
-        if let reference { UnregisterEventHotKey(reference) }
-        reference = nil
-        let id = EventHotKeyID(signature: OSType(0x4f524254), id: 1)
-        let status = RegisterEventHotKey(UInt32(code), Self.modifierMask(for: spec.modifiers), id, GetApplicationEventTarget(), 0, &reference)
-        guard status == noErr else { return false }
-        current = spec
-        return true
+    func register(_ specs: [HotKeySpec]) -> [HotKeySpec] {
+        guard specs != current else { return [] }
+        var next: [UInt32: Binding] = [:]
+        var resolved: [HotKeySpec] = []
+        var rejected: [HotKeySpec] = []
+
+        for (index, spec) in specs.enumerated() {
+            let slot = UInt32(index)
+            let existing = bindings.removeValue(forKey: slot)
+            // An unchanged chord keeps the registration it already holds, so an
+            // unrelated config save doesn't churn every binding in the set.
+            if let existing, existing.spec == spec {
+                next[slot] = existing
+                resolved.append(spec)
+                continue
+            }
+            // Validated *before* anything is torn down: an unknown key name is a config
+            // typo, and must not cost the user a working binding.
+            guard Self.keyCode(for: spec.key) != nil else {
+                rejected.append(spec)
+                if let existing { next[slot] = existing; resolved.append(existing.spec) }
+                continue
+            }
+            if let existing { UnregisterEventHotKey(existing.reference) }
+            if let reference = Self.claim(spec, slot: slot) {
+                next[slot] = Binding(spec: spec, reference: reference)
+                resolved.append(spec)
+            } else {
+                // The chord is valid but held by something else on the system. Put back
+                // whatever this slot had, if it will still take.
+                rejected.append(spec)
+                if let existing, let reference = Self.claim(existing.spec, slot: slot) {
+                    next[slot] = Binding(spec: existing.spec, reference: reference)
+                    resolved.append(existing.spec)
+                }
+            }
+        }
+        // Whatever is left is a slot the new config dropped entirely.
+        for binding in bindings.values { UnregisterEventHotKey(binding.reference) }
+        bindings = next
+        current = resolved
+        return rejected
+    }
+
+    private static func claim(_ spec: HotKeySpec, slot: UInt32) -> EventHotKeyRef? {
+        guard let code = keyCode(for: spec.key) else { return nil }
+        var reference: EventHotKeyRef?
+        let id = EventHotKeyID(signature: signature, id: slot)
+        let status = RegisterEventHotKey(UInt32(code), modifierMask(for: spec.modifiers), id,
+                                         GetApplicationEventTarget(), 0, &reference)
+        guard status == noErr, let reference else { return nil }
+        return reference
     }
 }
 
