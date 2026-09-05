@@ -4,17 +4,18 @@ Kitsune is a resident macOS launcher: a warm, borderless command panel that open
 global hotkey, in the shape of the Omarchy menu — apps, a nested command tree, search
 providers, and system actions, all fuzzy-searchable from one field.
 
-| Launcher | Search |
-| --- | --- |
-| ![Kitsune launcher](docs/kitsune-demo.jpg) | ![Kitsune search](docs/kitsune-search-demo.jpg) |
-
-| Pink theme | Pink theme apps |
-| --- | --- |
-| ![Kitsune pink theme](docs/kitsune-pink-theme.jpg) | ![Kitsune pink theme apps](docs/kitsune-pink-theme-apps.jpg) |
-
-| Rose Pine Moon | Rose Pine Moon apps |
-| --- | --- |
-| ![Kitsune Rose Pine Moon theme](docs/kitsune-rose-pine-moon-theme.jpg) | ![Kitsune Rose Pine Moon theme apps](docs/kitsune-rose-pine-moon-theme-apps.jpg) |
+<p>
+  <img src="docs/kitsune-demo.jpg" alt="Kitsune launcher" width="49%">
+  <img src="docs/kitsune-search-demo.jpg" alt="Kitsune search" width="49%">
+</p>
+<p>
+  <img src="docs/kitsune-pink-theme.jpg" alt="Kitsune pink theme" width="49%">
+  <img src="docs/kitsune-pink-theme-apps.jpg" alt="Kitsune pink theme apps" width="49%">
+</p>
+<p>
+  <img src="docs/kitsune-rose-pine-moon-theme.jpg" alt="Kitsune Rose Pine Moon theme" width="49%">
+  <img src="docs/kitsune-rose-pine-moon-theme-apps.jpg" alt="Kitsune Rose Pine Moon theme apps" width="49%">
+</p>
 
 The split that makes Kitsune hackable: **AppKit owns everything native — the panel,
 rendering, the app index, fuzzy matching, navigation, the hotkey and IPC — and an
