@@ -60,6 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.onQuery = { [weak menu] query in menu?.update(query: query) }
         panel.onActivate = { [weak menu] row in menu?.activate(row) }
         panel.onBack = { [weak menu] in menu?.back() ?? false }
+        panel.onRowActions = { [weak menu] row in menu?.showActions(for: row) }
         panel.onDismiss = { [weak self] in self?.dismiss() }
     }
 

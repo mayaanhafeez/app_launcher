@@ -106,6 +106,10 @@ struct DisplayRow: @unchecked Sendable {
     let section: String
     /// Set on provider rows, which have no backing `MenuNode` to look up.
     var action: ScriptAction? = nil
+    /// Set on the rows of an actions menu, which back no `MenuNode` either — and
+    /// unlike `action`, describe something the host does rather than something it
+    /// hands to Lua.
+    var rowAction: RowAction? = nil
 }
 
 struct AppEntry: @unchecked Sendable {

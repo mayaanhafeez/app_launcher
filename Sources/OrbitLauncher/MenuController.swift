@@ -1,5 +1,13 @@
 import AppKit
 
+/// Where the list currently is. An actions menu is built from the row the user
+/// pressed Tab on and backs no `MenuNode`, so — unlike every other location — it
+/// cannot be named by an id.
+enum MenuLocation {
+    case menu(String)
+    case actions(subject: DisplayRow, entries: [RowActionEntry])
+}
+
 @MainActor
 final class MenuController {
     let appIndex: AppIndex
@@ -14,8 +22,31 @@ final class MenuController {
     /// Republished on every config reload, like `backRow`.
     var search = SearchSpec()
     var providerLimits = ProviderSpec()
-    private var activeMenu = "root"
-    private var navigation: [String] = []
+    private var location: MenuLocation = .menu("root")
+    private var navigation: [Frame] = []
+
+    /// The id an actions menu reports. It deliberately matches no node, which is what
+    /// keeps the back row present (`decorated` only withholds it at `root`) and keeps
+    /// providers and commands from firing inside an actions list — both find their
+    /// work by looking the active menu up by id.
+    static let actionsMenuID = "orbit.actions"
+
+    private var activeMenu: String {
+        switch location {
+        case .menu(let id): return id
+        case .actions: return Self.actionsMenuID
+        }
+    }
+
+    /// One entry on the navigation stack.
+    private struct Frame {
+        let location: MenuLocation
+        /// The query to put back when this frame is returned to. `nil` clears it,
+        /// which is what every ordinary submenu does and must keep doing: leaving a
+        /// submenu is a fresh start. An actions menu is the exception — it is a
+        /// detour from a search, so the search has to survive it.
+        let restoreQuery: String?
+    }
     private var providerGeneration = 0
     private var query = ""
     private var iconCache: [String: NSImage] = [:]
@@ -53,7 +84,7 @@ final class MenuController {
     }
 
     func open(route: String = "root") {
-        activeMenu = resolve(route)
+        location = .menu(resolve(route))
         navigation = []
         onQuery?("")
         refresh(query: "")
@@ -76,6 +107,12 @@ final class MenuController {
             onDismiss?()
             return
         }
+        // Actions-menu rows are handled by the host itself, and carry no node to look
+        // up any more than a provider row does.
+        if let rowAction = row.rowAction {
+            perform(rowAction, subject: row)
+            return
+        }
         // Provider rows have no backing node; they carry their action inline.
         if let action = row.action {
             guard dispatch(action) else { return }
@@ -84,10 +121,7 @@ final class MenuController {
         }
         guard let node = nodes.first(where: { $0.id == row.id }) else { return }
         if node.kind == .menu {
-            navigation.append(activeMenu)
-            activeMenu = node.id
-            onQuery?("")
-            refresh(query: "")
+            push(.menu(node.id), restoring: nil)
         } else if let reference = node.actionReference {
             runtime.invoke(reference: reference, query: query)
             onDismiss?()
@@ -112,10 +146,84 @@ final class MenuController {
 
     func back() -> Bool {
         guard activeMenu != "root" else { return false }
-        activeMenu = navigation.popLast() ?? nodes.first(where: { $0.id == activeMenu })?.parent ?? "root"
+        let frame = navigation.popLast()
+        // With no frame to pop — a route opened directly, rather than navigated into
+        // — fall back to the node's parent, as this has always done.
+        location = frame?.location ?? .menu(nodes.first(where: { $0.id == activeMenu })?.parent ?? "root")
+        let restored = frame?.restoreQuery ?? ""
+        onQuery?(restored)
+        // Refreshed with the restored query, not merely repainted with it:
+        // `PanelController.setQuery` deliberately does not fire `onQuery` back, so
+        // nothing else would rebuild the list against it.
+        refresh(query: restored)
+        return true
+    }
+
+    /// The actions menu for `row`, pushed like any other submenu. A row with nothing
+    /// worth doing to it — the back row — is left alone rather than opening an empty
+    /// list the user then has to escape out of.
+    func showActions(for row: DisplayRow) {
+        let entries = RowActions.entries(for: row, query: query)
+        guard !entries.isEmpty else { return }
+        push(.actions(subject: row, entries: entries), restoring: query)
+    }
+
+    private func push(_ next: MenuLocation, restoring: String?) {
+        navigation.append(Frame(location: location, restoreQuery: restoring))
+        location = next
         onQuery?("")
         refresh(query: "")
-        return true
+    }
+
+    /// Runs a row action. Everything but the picker is terminal, so it dismisses;
+    /// the picker navigates and must not.
+    private func perform(_ action: RowAction, subject: DisplayRow) {
+        switch action {
+        case .copyText(let text):
+            guard !text.isBlank else { onNotice?("Nothing to copy"); return }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            onDismiss?()
+        case .revealInFinder(let path):
+            NSWorkspace.shared.activateFileViewerSelecting([Self.fileURL(path)])
+            onDismiss?()
+        case .openWith(let appPath, let target):
+            NSWorkspace.shared.open([Self.fileURL(target)], withApplicationAt: Self.fileURL(appPath),
+                                    configuration: NSWorkspace.OpenConfiguration())
+            onDismiss?()
+        case .openWithPicker(let target):
+            let entries = Self.openWithEntries(for: target)
+            guard !entries.isEmpty else { onNotice?("Nothing can open that"); return }
+            // Nested inside the actions menu, which the frame stack handles for free:
+            // one Escape returns to the actions, a second to the list.
+            push(.actions(subject: subject, entries: entries), restoring: nil)
+        }
+    }
+
+    private static func fileURL(_ path: String) -> URL {
+        URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+    }
+
+    /// Every app that claims it can open `target`, keyed by path so two apps sharing a
+    /// display name still get distinct ids.
+    private static func openWithEntries(for target: String) -> [RowActionEntry] {
+        NSWorkspace.shared.urlsForApplications(toOpen: fileURL(target)).map { app in
+            RowActionEntry(id: "orbit.action.open-with:\(app.path)",
+                           label: FileManager.default.displayName(atPath: app.path),
+                           symbol: "app", detail: app.path,
+                           action: .openWith(appPath: app.path, target: target))
+        }
+    }
+
+    /// An actions list is short and its order is deliberate, so a query decides only
+    /// whether a row survives — never where it sits.
+    private static func actionRows(_ entries: [RowActionEntry], query: String) -> [DisplayRow] {
+        entries.enumerated().compactMap { index, entry in
+            guard query.isEmpty || FuzzyMatcher.score(query, in: "\(entry.label) \(entry.detail)") != nil else { return nil }
+            return DisplayRow(id: entry.id, kind: entry.action.opensASubmenu ? .menu : .action,
+                              label: entry.label, detail: entry.detail, symbol: entry.symbol,
+                              image: nil, score: index, section: "actions", rowAction: entry.action)
+        }
     }
 
     func invoke(id: String) -> Bool {
@@ -235,7 +343,7 @@ final class MenuController {
         self.query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmed = self.query
         let menu = activeMenu
-        let built = build(menu: menu, query: trimmed)
+        let built = built(query: trimmed)
         let baseRows = built.rows
         let title = built.title
         onRows?(title, decorated(baseRows, menu: menu))
@@ -290,6 +398,16 @@ final class MenuController {
         } else {
             // Navigating away from a command menu has to kill whatever it started.
             commands.cancel()
+        }
+    }
+
+    /// The rows for wherever the list currently is. `build(menu:query:)` answers for a
+    /// real menu; an actions menu has no node to ask, so its rows come from the entries
+    /// captured when it was pushed.
+    private func built(query: String) -> (title: String, rows: [DisplayRow]) {
+        switch location {
+        case .menu(let id): return build(menu: id, query: query)
+        case .actions(let subject, let entries): return (subject.label, Self.actionRows(entries, query: query))
         }
     }
 
