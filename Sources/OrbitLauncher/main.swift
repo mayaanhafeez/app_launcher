@@ -17,10 +17,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The last value acted on, so an unrelated config save doesn't undo a toggle
     /// made from the menu bar. A real change in `config.lua` still wins.
     private var appliedLoginItem: Bool?
+    /// Whether the menu bar item has already been switched off once, so the notice
+    /// explaining what that costs is raised on the transition and not on every save.
+    private var appliedMenuBarEnabled: Bool?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         wireUI()
+        // Before `reloadAll`: the menu bar spec arrives with the first settings
+        // publish, and there would be nothing to apply it to otherwise.
+        startMenuBar()
         reloadAll()
         appIndex.start()
         let hotKey = GlobalHotKey()
@@ -29,7 +35,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.hotKey = hotKey
         startWatcher()
         startIPC()
-        startMenuBar()
     }
 
     private func wireUI() {
@@ -43,6 +48,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             usage.spec = settings.ranking
             panel.shortcuts = settings.shortcuts
             appIndex.apply(scan: settings.apps)
+            menuBar?.apply(settings.menuBar)
+            if appliedMenuBarEnabled != settings.menuBar.enabled {
+                appliedMenuBarEnabled = settings.menuBar.enabled
+                if !settings.menuBar.enabled { warnAboutHiddenMenuBar() }
+            }
             watcher?.setDebounce(settings.watchDebounce)
             themePointerWatcher?.setDebounce(settings.watchDebounce)
             if appliedLoginItem != settings.loginItem {
@@ -108,6 +118,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             setLoginItem(enabled)
         }
         self.menuBar = menuBar
+    }
+
+    /// Raised the first time the status item is switched off, and never again. The
+    /// panel's own notice is no use here: it auto-hides after five seconds and the
+    /// panel is shut when a config save lands, so nobody would ever see it. An
+    /// accessory app has to activate before a modal alert is visible.
+    private static let menuBarNoticeKey = "orbit.menuBarNoticeShown"
+
+    private func warnAboutHiddenMenuBar() {
+        guard !UserDefaults.standard.bool(forKey: Self.menuBarNoticeKey) else { return }
+        UserDefaults.standard.set(true, forKey: Self.menuBarNoticeKey)
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Orbit's menu bar item is now hidden"
+        alert.informativeText = """
+        Orbit keeps running in the background, but it has no Dock icon and no menu bar \
+        item, so the only ways left to reload or quit it are `orbitctl reload`, \
+        `orbitctl hide` and killing the process.
+
+        Set `menu_bar = { enabled = true }` in config.lua to bring it back.
+        """
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     private func setLoginItem(_ enabled: Bool) {

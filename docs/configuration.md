@@ -322,6 +322,35 @@ bar survives an unrelated `config.lua` save; editing this key back is still
 what wins. Only works from the built `.app` bundle (`scripts/build-app.sh`) — a
 bare `swift build` binary has no `Info.plist` for launchd to register against.
 
+### `menu_bar`
+
+```lua
+menu_bar = { enabled = true, symbol = "circle.dashed", title = "" },   -- defaults
+menu_bar = false,                                                     -- remove it
+```
+
+The `NSStatusItem` and its Open Config Folder / Reload Config / Open at Login /
+Quit menu. Applied on reload like every other setting, so switching it off and
+back on needs no restart.
+
+`symbol` is any SF Symbol name, drawn as a template image so it tracks the menu
+bar's light/dark appearance. An unknown name leaves the button's current icon in
+place rather than blanking it — the same rule `hotkey` follows for an unknown key.
+`title` draws text beside the symbol; empty is the icon-only default.
+
+**Removing it costs you something.** Orbit is `LSUIElement`: no Dock icon, and no
+main menu. The status item is the only UI outside the panel, so with
+`enabled = false` the only remaining ways to reload the config or quit are:
+
+```sh
+orbitctl reload
+orbitctl hide
+killall OrbitLauncher
+```
+
+Orbit raises a one-time alert saying exactly that the first time the item is
+switched off, and never mentions it again.
+
 ### `palette`
 
 Set in **`theme.lua`**, not `config.lua` — see [Theme](#theme) below.

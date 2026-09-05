@@ -33,22 +33,24 @@ enum LoginItem {
 /// The only persistent UI outside the panel. The app is an accessory (`LSUIElement`),
 /// so without this there is no way to reach the config, force a reload, or quit
 /// except `orbitctl` and `kill`.
+///
+/// The status item is created on demand rather than at init, because `menu_bar =
+/// { enabled = false }` has to be able to remove it outright: an `NSStatusItem` held
+/// in a stored property exists from the moment the object does.
 @MainActor
 final class MenuBarItem: NSObject, NSMenuDelegate {
-    private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private var item: NSStatusItem?
     private let loginToggle = NSMenuItem(title: "Open at Login", action: #selector(toggleLoginItem), keyEquivalent: "")
+    /// Built once and reattached to each status item, so re-enabling the menu bar
+    /// does not rebuild the entries or lose their targets.
+    private let menu = NSMenu()
+    private var applied: MenuBarSpec?
     var onOpenConfig: (() -> Void)?
     var onReload: (() -> Void)?
     var onToggleLoginItem: (() -> Void)?
 
-    init(symbol: String = "circle.dashed") {
+    override init() {
         super.init()
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Orbit")
-        image?.isTemplate = true   // so it tracks the menu bar's light/dark appearance
-        item.button?.image = image
-        item.button?.toolTip = "Orbit"
-
-        let menu = NSMenu()
         menu.addItem(withTitle: "Open Config Folder", action: #selector(openConfig), keyEquivalent: ",").target = self
         menu.addItem(withTitle: "Reload Config", action: #selector(reload), keyEquivalent: "r").target = self
         loginToggle.target = self
@@ -56,7 +58,30 @@ final class MenuBarItem: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Orbit", action: #selector(quit), keyEquivalent: "q").target = self
         menu.delegate = self
+    }
+
+    /// Republished on every config reload. Unchanged specs are ignored so a save that
+    /// touches something else never tears the status item down and puts it back.
+    func apply(_ spec: MenuBarSpec) {
+        guard spec != applied else { return }
+        applied = spec
+        guard spec.enabled else {
+            if let item { NSStatusBar.system.removeStatusItem(item) }
+            item = nil
+            return
+        }
+        let item = self.item ?? NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        self.item = item
         item.menu = menu
+        // An unknown symbol name yields nil, which would blank the button and leave no
+        // way to find it. Keep whatever it is drawing, as `GlobalHotKey` keeps its
+        // previous binding for an unknown key.
+        if let image = NSImage(systemSymbolName: spec.symbol, accessibilityDescription: "Orbit") {
+            image.isTemplate = true   // so it tracks the menu bar's light/dark appearance
+            item.button?.image = image
+        }
+        item.button?.title = spec.title
+        item.button?.toolTip = "Orbit"
     }
 
     /// The login item can be switched off in System Settings without telling the app,

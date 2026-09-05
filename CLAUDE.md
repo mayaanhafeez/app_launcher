@@ -227,6 +227,19 @@ Folder / Reload Config / Open at Login / Quit. The app is `LSUIElement`, so with
 and `kill`. "Open Config Folder" creates `~/.config/orbit` first — opening a path that doesn't exist does nothing at
 all.
 
+It is configured by `menu_bar = { enabled, symbol, title }` (or `menu_bar = false`), carried on `Settings`. The
+`NSStatusItem` is therefore created on demand in `apply(_:)` rather than held in a stored property — a stored one exists
+from the moment the object does, which is exactly what `enabled = false` has to be able to prevent. The `NSMenu` *is*
+built once in `init` and reattached, so re-enabling doesn't rebuild the entries or lose their targets. An unknown
+`symbol` leaves the button's image alone, on the same argument as `GlobalHotKey.register`. `AppDelegate.startMenuBar()`
+runs **before** `reloadAll()` for this reason: the spec arrives with the first settings publish and needs something to
+apply to.
+
+Switching it off is a one-way door for discoverability, so the first time it happens `AppDelegate` raises a modal
+`NSAlert` naming `orbitctl` and `kill` as what's left, gated on a `UserDefaults` flag so it never fires twice. The
+panel's own `showNotice` is no use here — it auto-hides after five seconds and the panel is shut when a config save
+lands.
+
 `LoginItem` wraps `SMAppService.mainApp` — no helper target, no legacy `SMLoginItemSetEnabled`. It only works from a
 real bundle (the bare `swift build` binary has no Info.plist for launchd), and registration is tied to the bundle's
 signature and location, so re-signing or moving the app can orphan it. `register()` can also succeed while leaving the

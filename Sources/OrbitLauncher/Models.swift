@@ -136,6 +136,18 @@ struct BackRowSpec: Sendable, Equatable {
     var atTop: Bool { position.lowercased() != "bottom" }
 }
 
+/// The status item, configured by `menu_bar = { ... }` in config.lua. `menu_bar = false`
+/// removes it entirely — which also removes the only way to reload or quit without
+/// `orbitctl`, since the app is `LSUIElement` and builds no main menu.
+struct MenuBarSpec: Sendable, Equatable {
+    var enabled = true
+    /// SF Symbol for the button. An unknown name leaves the button's image alone
+    /// rather than blanking it, on the same argument as `GlobalHotKey.register`.
+    var symbol = "circle.dashed"
+    /// Text drawn beside the symbol. Empty is the icon-only default.
+    var title = ""
+}
+
 /// Positional shortcuts for the visible list: the nth key activates the nth row.
 /// Configured by `shortcuts = { ... }` in config.lua; `shortcuts = false` switches
 /// them off. Kept pure — no AppKit state beyond the flags — so the key map is
@@ -286,6 +298,7 @@ struct Settings: Sendable {
     var back = BackRowSpec()
     var shortcuts = ShortcutSpec()
     var apps = AppScanSpec()
+    var menuBar = MenuBarSpec()
 }
 
 // MARK: - Vim mode

@@ -197,6 +197,13 @@ return {
   -- next time the config is saved. Only works from the built .app bundle.
   login_item = false,
 
+  -- The menu bar item. `menu_bar = false` removes it entirely -- but the app has no
+  -- Dock icon either, so with it gone the only ways left to reload or quit are
+  -- `orbitctl` and `kill`. Orbit says so once, the first time you switch it off.
+  -- `symbol` is any SF Symbol; an unknown name leaves the current icon alone.
+  -- `title` draws text beside it, and is empty for the icon-only default.
+  menu_bar = { enabled = true, symbol = "circle.dashed", title = "" },
+
   -- Frecency. Rows you activate often, and recently, rank higher in *search*
   -- results; the order you wrote below is never rearranged. `ranking = false`
   -- switches it off. `half_life` is in seconds, `weight` is the ceiling on the
