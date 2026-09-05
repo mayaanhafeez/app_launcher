@@ -1,4 +1,4 @@
--- OrbitLauncher theme. Copy to ~/.config/orbit/theme.lua.
+-- KitsuneLauncher theme. Copy to ~/.config/kitsune/theme.lua.
 -- Reloads on save, in a restricted Lua state that can only restyle the panel.
 -- Layout is native, so this token set is the whole appearance surface: if a value
 -- is not here, it is not hardcoded somewhere else — file it as a missing token.
@@ -8,7 +8,7 @@ return {
   -- external scheme file; anything you set below still overrides it.
   --   "auto"            follow ~/.config/theme (so `set-theme` retints this too)
   --   "kanagawa"        a name, searched in this order:
-  --                       ~/.config/orbit/themes/<name>.{toml,yaml,yml,conf,theme}
+  --                       ~/.config/kitsune/themes/<name>.{toml,yaml,yml,conf,theme}
   --                       ~/omarchy/themes/<name>/colors.toml
   --                       ~/.config/{kitty,ghostty,btop}/themes/<name>
   --   "~/path/to/scheme.yaml"   an explicit file

@@ -17,7 +17,7 @@ return {
         return {
           label = label, detail = detail, symbol = symbol, value = value,
           applescript = 'set the clipboard to "' .. asquote(text) .. '"\n'
-            .. 'display notification "Copied ' .. asquote(text) .. '" with title "Orbit"',
+            .. 'display notification "Copied ' .. asquote(text) .. '" with title "Kitsune"',
         }
       end
 

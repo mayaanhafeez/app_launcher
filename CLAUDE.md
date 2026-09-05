@@ -6,15 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```sh
 swift build                              # debug build of both executables
-scripts/build-app.sh                     # release build + assemble/codesign .build/OrbitLauncher.app
-open .build/OrbitLauncher.app            # run the resident app (no Dock/menu-bar item; LSUIElement)
+scripts/build-app.sh                     # release build + assemble/codesign .build/KitsuneLauncher.app
+open .build/KitsuneLauncher.app            # run the resident app (no Dock/menu-bar item; LSUIElement)
 swift test                               # swift-testing suite
 swift test --filter fuzzyMatching        # single test (filter matches the @Test function name)
-swift run orbitctl toggle                # drive a running instance over IPC
+swift run kitsunectl toggle                # drive a running instance over IPC
 ```
 
 `scripts/build-app.sh` is the only supported way to run the GUI: the bare `swift build` binary has no bundle, so
-`Resources/Info.plist` (bundle id `com.orbit.launcher`, `LSUIElement`) never applies and the accessory-app behavior and
+`Resources/Info.plist` (bundle id `com.kitsune.launcher`, `LSUIElement`) never applies and the accessory-app behavior and
 container-relative socket path break. Ad-hoc codesigning is part of the script because the global hotkey and AppleScript
 automation need a stable signature for TCC grants — resigning invalidates them, so expect fresh Accessibility/Automation
 prompts after a rebuild.
@@ -25,9 +25,9 @@ There is no linter or formatter configured.
 
 Two executables from one SwiftPM package (`Package.swift`), plus a vendored Lua 5.4.8 C target:
 
-- **`OrbitLauncher`** — the resident AppKit app. Owns everything native: panel rendering, app index, fuzzy matching,
+- **`KitsuneLauncher`** — the resident AppKit app. Owns everything native: panel rendering, app index, fuzzy matching,
   navigation state, the global hotkey, and the IPC server.
-- **`orbitctl`** (`Sources/OrbitCLI/main.swift`) — a ~30-line raw-`Darwin` Unix-socket client. Encodes a
+- **`kitsunectl`** (`Sources/KitsuneCLI/main.swift`) — a ~30-line raw-`Darwin` Unix-socket client. Encodes a
   `{command, argument}` JSON request, reads one JSON response, exits `0`/`1`. It holds no app logic.
 - **`Palette`** (`Palette.swift`) — imports external colour schemes. Base16 YAML, Omarchy
   `colors.toml`, kitty `.conf`, ghostty and btop `.theme` are all flat `key → hex` files
@@ -47,7 +47,7 @@ type in `Panel.swift`, not in a Lua-driven layout escape hatch.
 
 ### Data flow
 
-`AppDelegate` (`Sources/OrbitLauncher/main.swift`) wires four objects with closures — there is no framework binding, no
+`AppDelegate` (`Sources/KitsuneLauncher/main.swift`) wires four objects with closures — there is no framework binding, no
 observation, and the pieces don't know each other's types:
 
 ```
@@ -85,7 +85,7 @@ AppIndex ──onChange──▶ MenuController
 
 ### LuaRuntime
 
-All Lua work is serialized on a private `orbit.lua` queue and results are hopped back to `@MainActor`; `LuaRuntime` is
+All Lua work is serialized on a private `kitsune.lua` queue and results are hopped back to `@MainActor`; `LuaRuntime` is
 `@unchecked Sendable` on that basis. Every `lua_pcall` runs inside `withBudget`, which installs a count hook (1M
 instruction ceiling, optional wall-clock deadline) keyed by state pointer in a global map.
 
@@ -115,7 +115,7 @@ empty path to `NSWorkspace` raises a system "file can't be found" dialog.
 the way a Neovim one does; `package.cpath` is emptied because a launcher config has no business
 dlopen-ing.
 
-Config lives at `~/.config/orbit/{config.lua,theme.lua}` (`Config/` holds the templates users copy). A missing config
+Config lives at `~/.config/kitsune/{config.lua,theme.lua}` (`Config/` holds the templates users copy). A missing config
 falls back to `LuaRuntime.defaultNodes`; a config without a `root` item gets one injected.
 
 `ConfigWatcher` watches **both the directory and each file**, with an 80ms debounce. A directory
@@ -276,8 +276,8 @@ NORMAL while the field is editing.
 ### Menu bar
 
 `MenuBarItem` (`SystemServices.swift`) is the only persistent UI outside the panel: an `NSStatusItem` with Open Config
-Folder / Reload Config / Open at Login / Quit. The app is `LSUIElement`, so without it the only ways to reload or quit are `orbitctl`
-and `kill`. "Open Config Folder" creates `~/.config/orbit` first — opening a path that doesn't exist does nothing at
+Folder / Reload Config / Open at Login / Quit. The app is `LSUIElement`, so without it the only ways to reload or quit are `kitsunectl`
+and `kill`. "Open Config Folder" creates `~/.config/kitsune` first — opening a path that doesn't exist does nothing at
 all.
 
 It is configured by `menu_bar = { enabled, symbol, title }` (or `menu_bar = false`), carried on `Settings`. The
@@ -306,11 +306,11 @@ the app.
 ### IPC
 
 `IPCServer` binds a `0600` Unix socket at
-`~/Library/Containers/com.orbit.launcher/Data/tmp/orbit.sock`. One request, one response, connection closed. The handler
+`~/Library/Containers/com.kitsune.launcher/Data/tmp/kitsune.sock`. One request, one response, connection closed. The handler
 runs on `@MainActor`. Commands: `ping`, `toggle [route]`, `show [route]`, `hide`, `reload`, `theme`, `version`,
 `invoke <node-id>`. The verb switch lives in `IPCCommands` (`SystemServices.swift`), which holds no AppKit state —
 `AppDelegate.handle(_:)` only binds each effect to the delegate's objects, so the command surface is testable without an
-`NSApplication`. Adding a command means editing that switch and adding a closure; `orbitctl` forwards whatever verb it's
+`NSApplication`. Adding a command means editing that switch and adding a closure; `kitsunectl` forwards whatever verb it's
 given and needs no change. `theme` reports the resolved palette name, which is the quickest way to check what a config
 actually loaded; `version` reads the bundle's stamped plist rather than a compiled-in constant, so it cannot drift from
 the tag `scripts/build-app.sh` built from.
@@ -334,7 +334,7 @@ bind so `AppDelegate` names those and only those. An unchanged spec keeps the re
 unrelated config save doesn't churn the set.
 
 `HotKeySpec.target` is a `HotKeyTarget`: `.toggle(route)` opens the panel (`"root"` being the historical behaviour), and
-`.invoke(id)` fires a node through `MenuController.invoke(id:)` — the same entry point `orbitctl invoke` uses — with no
+`.invoke(id)` fires a node through `MenuController.invoke(id:)` — the same entry point `kitsunectl invoke` uses — with no
 panel at all. Because an `invoke` chord shows nothing, a failure is `NSLog`ed as well as noticed, or it is silent.
 
 `hotkeys = { ... }` is the list; `hotkey = { ... }` stays a single-entry alias decoded by the same `decodeHotKey`, and
