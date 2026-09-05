@@ -13,7 +13,7 @@ providers, and system actions, all fuzzy-searchable from one field.
   <img src="docs/kitsune-pink-theme-apps.jpg" alt="Kitsune pink theme apps" width="49%">
 </p>
 <p>
-  <img src="docs/kitsune-rose-pine-moon-main.jpg" alt="Kitsune Rose Pine Moon theme" width="49%">
+  <img src="docs/kitsune-rose-pine-moon-launcher.jpg" alt="Kitsune Rose Pine Moon theme" width="49%">
   <img src="docs/kitsune-rose-pine-moon-theme-apps.jpg" alt="Kitsune Rose Pine Moon theme apps" width="49%">
 </p>
 
