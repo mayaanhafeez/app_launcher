@@ -102,6 +102,11 @@ final class LuaRuntime: @unchecked Sendable {
     private var providers: [String: Int32] = [:]
     var onReload: ((Result<[MenuNode], Error>) -> Void)?
     var onSettings: ((Settings) -> Void)?
+    /// How the load itself went — nil on success, the Lua error otherwise. Separate
+    /// from `onReload` because the node set has one consumer (`MenuController`) and
+    /// the error state has another: the menu bar has to keep showing it long after a
+    /// five-second toast would have gone.
+    var onLoadOutcome: ((String?) -> Void)?
 
     func load(file: URL) {
         queue.async { [weak self] in self?.reload(file: file) }
@@ -604,7 +609,16 @@ final class LuaRuntime: @unchecked Sendable {
         lua_settop(state, 0)
     }
 
-    private func publish(_ result: Result<[MenuNode], Error>) { DispatchQueue.main.async { [weak self] in self?.onReload?(result) } }
+    /// Every exit from `reload` lands here exactly once, which is what makes the
+    /// outcome a reliable "the load finished, and this is how" signal rather than
+    /// something each error path has to remember to send.
+    private func publish(_ result: Result<[MenuNode], Error>) {
+        DispatchQueue.main.async { [weak self] in
+            self?.onReload?(result)
+            let failure = if case let .failure(error) = result { error.localizedDescription } else { String?.none }
+            self?.onLoadOutcome?(failure)
+        }
+    }
     private func publishSettings(_ settings: Settings) { DispatchQueue.main.async { [weak self] in self?.onSettings?(settings) } }
 
     private static let defaultNodes = [

@@ -45,14 +45,22 @@ final class MenuBarItem: NSObject, NSMenuDelegate {
     /// does not rebuild the entries or lose their targets.
     private let menu = NSMenu()
     private var applied: MenuBarSpec?
+    /// Hidden until a config load fails, and the reason the button is tinted. Held
+    /// here rather than read back off the item, which may not exist yet.
+    private let errorItem = NSMenuItem(title: "Show Last Error", action: #selector(showLastError), keyEquivalent: "")
+    private var hasError = false
     var onOpenConfig: (() -> Void)?
     var onReload: (() -> Void)?
     var onToggleLoginItem: (() -> Void)?
+    var onShowLastError: (() -> Void)?
 
     override init() {
         super.init()
         menu.addItem(withTitle: "Open Config Folder", action: #selector(openConfig), keyEquivalent: ",").target = self
         menu.addItem(withTitle: "Reload Config", action: #selector(reload), keyEquivalent: "r").target = self
+        errorItem.target = self
+        errorItem.isHidden = true
+        menu.addItem(errorItem)
         loginToggle.target = self
         menu.addItem(loginToggle)
         menu.addItem(.separator())
@@ -83,7 +91,23 @@ final class MenuBarItem: NSObject, NSMenuDelegate {
             item.button?.image = image
         }
         item.button?.title = spec.title
-        item.button?.toolTip = "Kitsune"
+        // After the button exists, and on every re-creation: an outstanding error has
+        // to survive the status item being switched off and back on.
+        refreshErrorState()
+    }
+
+    /// The outstanding config error, or nil to clear it. The symbol is tinted rather
+    /// than swapped, so the item stays where the eye already looks for it.
+    func apply(error: String?) {
+        hasError = error != nil
+        errorItem.toolTip = error
+        refreshErrorState()
+    }
+
+    private func refreshErrorState() {
+        errorItem.isHidden = !hasError
+        item?.button?.contentTintColor = hasError ? .systemRed : nil
+        item?.button?.toolTip = hasError ? "Kitsune — config.lua failed to load" : "Kitsune"
     }
 
     /// The login item can be switched off in System Settings without telling the app,
@@ -95,6 +119,7 @@ final class MenuBarItem: NSObject, NSMenuDelegate {
     @objc private func toggleLoginItem() { onToggleLoginItem?() }
     @objc private func openConfig() { onOpenConfig?() }
     @objc private func reload() { onReload?() }
+    @objc private func showLastError() { onShowLastError?() }
     @objc private func quit() { NSApp.terminate(nil) }
 }
 
@@ -354,7 +379,10 @@ struct IPCCommands {
     var toggle: (String) -> Void = { _ in }
     var show: (String) -> Void = { _ in }
     var hide: () -> Void = {}
-    var reload: () -> Void = {}
+    /// Asynchronous, unlike every other verb: a reload runs on the Lua queue, and the
+    /// reply carries the error it produced. Answering `ok` before the config had even
+    /// been parsed is what made `kitsunectl reload` useless in a script.
+    var reload: (@escaping (String?) -> Void) -> Void = { $0(nil) }
     /// The resolved palette name, or empty when the theme set none.
     var paletteName: () -> String = { "" }
     var version: () -> String = { "unbundled" }
@@ -362,13 +390,21 @@ struct IPCCommands {
     /// The rows a route would show. Returns nil when there is no menu to ask.
     var list: (_ route: String, _ query: String) -> (title: String, rows: [DisplayRow])? = { _, _ in nil }
 
-    func handle(_ request: IPCRequest) -> IPCResponse {
+    func handle(_ request: IPCRequest, completion: @escaping (IPCResponse) -> Void) {
+        guard request.command == "reload" else { return completion(response(for: request)) }
+        reload { error in
+            completion(error.map { IPCResponse(ok: false, message: $0) } ?? IPCResponse(ok: true, message: "ok"))
+        }
+    }
+
+    /// Every verb but `reload`, still a pure function of the request — no socket, no
+    /// NSApplication, nothing to wait for.
+    private func response(for request: IPCRequest) -> IPCResponse {
         switch request.command {
         case "ping": return IPCResponse(ok: true, message: "ok")
         case "toggle": toggle(request.argument ?? "root"); return IPCResponse(ok: true, message: "ok")
         case "show": show(request.argument ?? "root"); return IPCResponse(ok: true, message: "ok")
         case "hide": hide(); return IPCResponse(ok: true, message: "ok")
-        case "reload": reload(); return IPCResponse(ok: true, message: "ok")
         case "theme":
             let name = paletteName()
             return IPCResponse(ok: true, message: name.isEmpty ? "(no palette)" : name)
@@ -401,7 +437,7 @@ final class IPCServer: @unchecked Sendable {
     private let queue = DispatchQueue(label: "kitsune.ipc")
     private var socket: Int32 = -1
     private var source: DispatchSourceRead?
-    var handler: (@MainActor (IPCRequest) -> IPCResponse)?
+    var handler: (@MainActor (IPCRequest, @escaping @MainActor (IPCResponse) -> Void) -> Void)?
 
     init(socketURL: URL) { self.socketURL = socketURL }
 
@@ -436,12 +472,15 @@ final class IPCServer: @unchecked Sendable {
             let count = read(client, &buffer, buffer.count)
             guard count > 0, let request = try? JSONDecoder().decode(IPCRequest.self, from: Data(buffer.prefix(count))) else { close(client); return }
             Task { @MainActor [weak self] in
-                defer { close(client) }
-                let response = self?.handler?(request) ?? IPCResponse(ok: false, message: "No handler")
-                // A `list` reply is far larger than a socket buffer, and `write` is
-                // free to accept only part of it. Loop until it is all gone, or a
-                // long listing arrives at the client as truncated JSON.
-                if let data = try? JSONEncoder().encode(response) {
+                // The reply is written when the handler answers, which for `reload` is
+                // after the config has actually been parsed — so the connection stays
+                // open until then rather than closing on a premature `ok`.
+                let reply: @MainActor (IPCResponse) -> Void = { response in
+                    defer { close(client) }
+                    // A `list` reply is far larger than a socket buffer, and `write` is
+                    // free to accept only part of it. Loop until it is all gone, or a
+                    // long listing arrives at the client as truncated JSON.
+                    guard let data = try? JSONEncoder().encode(response) else { return }
                     data.withUnsafeBytes { buffer in
                         guard var pointer = buffer.baseAddress else { return }
                         var remaining = buffer.count
@@ -453,6 +492,8 @@ final class IPCServer: @unchecked Sendable {
                         }
                     }
                 }
+                guard let handler = self?.handler else { return reply(IPCResponse(ok: false, message: "No handler")) }
+                handler(request, reply)
             }
         }
     }

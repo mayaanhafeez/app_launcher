@@ -65,7 +65,7 @@ private final class CommandRecorder {
             toggle: { [self] route in toggled.append(route) },
             show: { [self] route in shown.append(route) },
             hide: { [self] in hidden += 1 },
-            reload: { [self] in reloaded += 1 },
+            reload: { [self] answer in reloaded += 1; answer(nil) },
             paletteName: { [self] in palette },
             version: { "9.9.9 (42)" },
             invoke: { [self] id in invoked.append(id); return knownNodes.contains(id) }
@@ -77,7 +77,7 @@ private final class CommandRecorder {
 private func startIPCServer(_ recorder: CommandRecorder) throws -> (server: IPCServer, path: String, directory: URL) {
     let directory = kitsuneTemporaryDirectory("kitsune-ipc")
     let server = IPCServer(socketURL: directory.appendingPathComponent("kitsune.sock"))
-    server.handler = { request in recorder.commands.handle(request) }
+    server.handler = { request, reply in recorder.commands.handle(request, completion: reply) }
     try server.start()
     return (server, server.socketURL.path, directory)
 }
@@ -182,7 +182,7 @@ private func startIPCServer(_ recorder: CommandRecorder) throws -> (server: IPCS
     try Data("stale".utf8).write(to: url)
 
     let server = IPCServer(socketURL: url)
-    server.handler = { request in recorder.commands.handle(request) }
+    server.handler = { request, reply in recorder.commands.handle(request, completion: reply) }
     try server.start()
     defer { _ = server }
 
@@ -233,8 +233,8 @@ private func ipcSendLargeRaw(_ payload: Data, to path: String) -> Data {
         DisplayRow(id: "app:/Applications/App\($0).app", kind: .app, label: "Application \($0)",
                    detail: "/Applications/App\($0).app", symbol: "", image: nil, score: $0, section: "apps")
     }
-    server.handler = { request in
-        IPCCommands(list: { _, _ in (title: "Apps", rows: rows) }).handle(request)
+    server.handler = { request, reply in
+        IPCCommands(list: { _, _ in (title: "Apps", rows: rows) }).handle(request, completion: reply)
     }
     try server.start()
     defer { kitsuneRemove(directory); _ = server }
@@ -251,4 +251,32 @@ private func ipcSendLargeRaw(_ payload: Data, to path: String) -> Data {
     // Every row arrives, not just the first bufferful.
     #expect(listing?.rows.count == 800)
     #expect(listing?.rows.last?.label == "Application 799")
+}
+
+@MainActor
+@Test func reloadKeepsTheConnectionOpenUntilTheLoadFinishes() async throws {
+    // A reload runs on the Lua queue, so its reply cannot be written before the
+    // config has been parsed — the client would read `ok` for a config that then
+    // failed to load. The connection has to stay open until the outcome arrives.
+    let answers = Locked<[(String?) -> Void]>([])
+    let commands = IPCCommands(reload: { answer in answers.value.append(answer) })
+
+    let directory = kitsuneTemporaryDirectory("kitsune-ipc")
+    let server = IPCServer(socketURL: directory.appendingPathComponent("kitsune.sock"))
+    server.handler = { request, reply in commands.handle(request, completion: reply) }
+    try server.start()
+    defer { kitsuneRemove(directory); _ = server }
+
+    let path = server.socketURL.path
+    let payload = try JSONEncoder().encode(IPCRequest(command: "reload", argument: nil))
+    async let reply = ipcSend(payload, to: path)
+
+    // The request has reached the handler and is waiting on a load that has not
+    // finished; nothing has been written back yet.
+    #expect(await kitsuneWaitUntil(timeout: 3) { !answers.value.isEmpty })
+    answers.value.forEach { $0("Config: boom") }
+
+    let response = try? JSONDecoder().decode(IPCResponse.self, from: await reply)
+    #expect(response?.ok == false)
+    #expect(response?.message == "Config: boom")
 }

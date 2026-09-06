@@ -429,6 +429,19 @@ bar's light/dark appearance. An unknown name leaves the button's current icon in
 place rather than blanking it — the same rule `hotkey` follows for an unknown key.
 `title` draws text beside the symbol; empty is the icon-only default.
 
+**Config errors show up here.** A save that breaks `config.lua` normally lands with
+the panel closed, so the panel's own five-second notice is shown to nobody. While a
+load is failing, the status item is tinted red and gains a **Show Last Error** entry
+carrying the full Lua message; both clear on the next load that succeeds. The last
+good config keeps running in the meantime.
+
+`kitsunectl reload` reports the same thing: it waits for the load to finish and exits
+non-zero with the Lua error, so a config edit can be checked in a script.
+
+```sh
+kitsunectl reload || echo "config.lua is broken"
+```
+
 **Removing it costs you something.** Kitsune is `LSUIElement`: no Dock icon, and no
 main menu. The status item is the only UI outside the panel, so with
 `enabled = false` the only remaining ways to reload the config or quit are:

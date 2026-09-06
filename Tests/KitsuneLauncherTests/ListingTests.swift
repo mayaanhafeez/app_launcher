@@ -55,9 +55,9 @@ private func listingController() -> MenuController {
         ])
     })
     let response = commands.handle(IPCRequest(command: "list", argument: "apps"))
-    #expect(response.ok)
+    #expect(response?.ok == true)
 
-    let payload = try? JSONDecoder().decode(ListingPayload.self, from: Data(response.message.utf8))
+    let payload = try? JSONDecoder().decode(ListingPayload.self, from: Data((response?.message ?? "").utf8))
     #expect(payload?.title == "Apps")
     #expect(payload?.rows.count == 1)
     #expect(payload?.rows.first?.kind == "app")
@@ -87,5 +87,5 @@ private func listingController() -> MenuController {
 @MainActor
 @Test func listCommandFailsWhenThereIsNoMenu() {
     // The default closure stands in for a delegate that has been torn down.
-    #expect(!IPCCommands().handle(IPCRequest(command: "list", argument: "apps")).ok)
+    #expect(IPCCommands().handle(IPCRequest(command: "list", argument: "apps"))?.ok == false)
 }

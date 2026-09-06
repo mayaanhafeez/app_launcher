@@ -63,6 +63,20 @@ func kitsuneRewriteInPlace(_ url: URL, _ contents: String) throws {
     try handle.synchronize()
 }
 
+// MARK: - IPC
+
+extension IPCCommands {
+    /// Every verb but `reload` answers inline, so a test can still read the response
+    /// as a return value. `reload` waits on a config load, so it answers nil here —
+    /// the tests that care drive it through the completion directly.
+    @MainActor
+    func handle(_ request: IPCRequest) -> IPCResponse? {
+        var response: IPCResponse?
+        handle(request) { response = $0 }
+        return response
+    }
+}
+
 // MARK: - Lua
 
 /// Everything a config load publishes, collected off the main queue.
