@@ -46,6 +46,9 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
     private let modeLabel = NSTextField(labelWithString: "NORMAL")
     private let emptyLabel = NSTextField(labelWithString: "No matches")
     private var rows: [DisplayRow] = []
+    /// Where the pointer was, and what was focused, when the panel was last shown.
+    private var anchorPointer = NSEvent.mouseLocation
+    private var anchorWindow: NSRect?
     private var theme = Theme()
     private var title = "Go"
     private let rowIdentifier = NSUserInterfaceItemIdentifier("kitsune-row")
@@ -146,6 +149,7 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
 
     func show(route: String = "root") {
         guard let panel = window else { return }
+        captureAnchors()
         input.stringValue = ""
         mode = .normal
         refreshModeIndicator()
@@ -273,12 +277,26 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
 
     // MARK: - Sizing
 
+    /// Read once per showing rather than per resize. `resizeToContent` runs on every
+    /// keystroke, and an Accessibility lookup is a cross-process call — but the
+    /// pointer matters too: re-reading it would let the panel hop displays, or crawl
+    /// after the mouse, while the user is typing into it.
+    private func captureAnchors() {
+        anchorPointer = NSEvent.mouseLocation
+        let needsWindow = theme.position == .activeWindow || theme.screen == .active
+        anchorWindow = needsWindow ? FocusedWindow.frame() : nil
+    }
+
     /// The card is content-sized like the omarchy menu: it shrinks to the rows it
     /// holds and only scrolls once it hits the screen-fraction cap.
     private func resizeToContent() {
         guard let panel = window else { return }
-        let screen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? NSScreen.main
-        let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let screens = NSScreen.screens
+        let index = PanelPlacement.screenIndex(theme.screen, screens: screens.map(\.frame),
+                                               pointer: anchorPointer, focusedWindow: anchorWindow)
+        let visible = screens.indices.contains(index)
+            ? screens[index].visibleFrame
+            : NSRect(x: 0, y: 0, width: 1440, height: 900)
 
         let edges = theme.topPadding + theme.bottomPadding
         let chrome = edges + theme.headerHeight + theme.space(theme.headerGap)
@@ -286,11 +304,15 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
         let height = min(chrome + contentHeight(), cap).rounded()
         let width = min(theme.width, visible.width - theme.sidePadding * 2).rounded()
 
-        let origin = NSPoint(
-            x: (visible.midX - width / 2).rounded(),
-            y: (visible.midY - height / 2 + theme.offsetY).rounded()
+        let frame = PanelPlacement.frame(
+            size: NSSize(width: width, height: height),
+            visible: visible,
+            anchor: theme.position,
+            offset: CGPoint(x: theme.offsetX, y: theme.offsetY),
+            pointer: anchorPointer,
+            focusedWindow: anchorWindow
         )
-        panel.setFrame(NSRect(origin: origin, size: NSSize(width: width, height: height)), display: true)
+        panel.setFrame(frame, display: true)
         // The shadow is derived from the masked content, so it has to be recomputed
         // whenever the card resizes or it keeps the previous outline.
         panel.invalidateShadow()

@@ -432,6 +432,100 @@ enum EditingKeys {
     }
 }
 
+// MARK: - Placement
+
+/// Where the card sits on its display.
+enum PanelAnchor: String, Sendable, CaseIterable {
+    /// The historical placement: centred on the visible frame.
+    case center
+    /// Flush with the top of the visible frame, centred horizontally.
+    case top
+    /// Hanging below the pointer, the way a context menu does.
+    case mouse
+    /// Centred on the focused window, falling back to `.mouse` when the
+    /// Accessibility API has nothing to report.
+    case activeWindow = "active-window"
+}
+
+/// Which display the card lands on.
+enum PanelScreenChoice: String, Sendable, CaseIterable {
+    /// The display under the pointer — what the panel has always used.
+    case mouse
+    /// The primary display, the one holding the menu bar.
+    case main
+    /// The display holding the focused window, falling back to `.mouse`.
+    case active
+}
+
+/// The panel's geometry, resolved without touching AppKit: the caller supplies the
+/// visible frame, the pointer and the focused window, so every anchor and every
+/// clamp is testable without a screen.
+enum PanelPlacement {
+    /// The display to place the card on, as an index into `screens` — which is
+    /// `NSScreen.screens`, whose first element is the primary display. An empty or
+    /// unmatched lookup falls back to that primary display rather than to nothing.
+    static func screenIndex(
+        _ choice: PanelScreenChoice,
+        screens: [NSRect],
+        pointer: NSPoint,
+        focusedWindow: NSRect?
+    ) -> Int {
+        func index(containing point: NSPoint) -> Int? { screens.firstIndex { $0.contains(point) } }
+        switch choice {
+        case .main: return 0
+        case .mouse: return index(containing: pointer) ?? 0
+        case .active:
+            guard let focusedWindow else { return index(containing: pointer) ?? 0 }
+            // The centre rather than the origin: a window straddling two displays
+            // belongs to the one showing most of it.
+            return index(containing: NSPoint(x: focusedWindow.midX, y: focusedWindow.midY))
+                ?? index(containing: pointer) ?? 0
+        }
+    }
+
+    /// The card's frame: `size` anchored inside `visible`, nudged by `offset`, then
+    /// clamped so neither a large offset nor a small display can push it off-screen.
+    static func frame(
+        size: NSSize,
+        visible: NSRect,
+        anchor: PanelAnchor,
+        offset: CGPoint,
+        pointer: NSPoint,
+        focusedWindow: NSRect?
+    ) -> NSRect {
+        let width = min(size.width, visible.width)
+        let height = min(size.height, visible.height)
+        let centred = NSPoint(x: visible.midX - width / 2, y: visible.midY - height / 2)
+
+        var origin: NSPoint
+        switch anchor {
+        case .center:
+            origin = centred
+        case .top:
+            origin = NSPoint(x: centred.x, y: visible.maxY - height)
+        case .mouse:
+            // Top edge at the pointer, so the list grows downwards and the card's top
+            // stays put as rows come and go.
+            origin = NSPoint(x: pointer.x - width / 2, y: pointer.y - height)
+        case .activeWindow:
+            guard let focusedWindow else {
+                return frame(size: size, visible: visible, anchor: .mouse,
+                             offset: offset, pointer: pointer, focusedWindow: nil)
+            }
+            origin = NSPoint(x: focusedWindow.midX - width / 2, y: focusedWindow.midY - height / 2)
+        }
+
+        origin.x = (origin.x + offset.x).clamped(to: visible.minX...max(visible.minX, visible.maxX - width))
+        origin.y = (origin.y + offset.y).clamped(to: visible.minY...max(visible.minY, visible.maxY - height))
+        return NSRect(origin: NSPoint(x: origin.x.rounded(), y: origin.y.rounded()),
+                      size: NSSize(width: width.rounded(), height: height.rounded()))
+    }
+}
+
+private extension CGFloat {
+    func clamped(to range: ClosedRange<CGFloat>) -> CGFloat { Swift.min(Swift.max(self, range.lowerBound), range.upperBound) }
+}
+
 // MARK: - Theme
 
 /// Every value the panel draws with. Layout is native, so this token set *is* the
@@ -464,7 +558,14 @@ struct Theme: Sendable {
     /// Cap on panel height as a fraction of the visible screen.
     var maxHeight: CGFloat = 0.6
     var borderWidth: CGFloat = 1
+    /// Nudges applied to whichever anchor `position` resolves to, in screen
+    /// coordinates — positive `y` is up — and clamped along with it, so no offset can
+    /// push the card off the display. The default pairs with `.center` to reproduce
+    /// the placement the panel has always had.
+    var offsetX: CGFloat = 0
     var offsetY: CGFloat = 28
+    var position: PanelAnchor = .center
+    var screen: PanelScreenChoice = .mouse
 
     // Spacing, all multiplied by `spacingScale`
     var spacingScale: CGFloat = 1

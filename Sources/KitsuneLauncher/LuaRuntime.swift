@@ -674,7 +674,13 @@ final class ThemeRuntime: @unchecked Sendable {
         size("width", minimum: 220, &theme.width)
         if let value = number("max_height"), value > 0 { theme.maxHeight = min(1, value) }
         size("border_width", &theme.borderWidth)
+        if let value = number("offset_x") { theme.offsetX = value }
         if let value = number("offset_y") { theme.offsetY = value }
+        // Underscores normalise to dashes, as they do for routes, so `active_window`
+        // and `active-window` both name the anchor.
+        func choice(_ key: String) -> String? { string(key)?.replacingOccurrences(of: "_", with: "-") }
+        if let value = choice("position"), let anchor = PanelAnchor(rawValue: value) { theme.position = anchor }
+        if let value = choice("screen"), let screen = PanelScreenChoice(rawValue: value) { theme.screen = screen }
 
         if let value = number("spacing_scale"), value > 0 { theme.spacingScale = value }
         size("panel_padding", &theme.panelPadding)

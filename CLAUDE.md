@@ -197,6 +197,17 @@ The card is content-sized: `resizeToContent` sums the row heights and caps at `m
 screen. It runs *before* `reloadData` in `update(title:rows:)`, because selection repainting walks
 realized rows and the table has none until laid out at its final height.
 
+**Where** it lands is `PanelPlacement` (`Models.swift`) — pure, like `VimKeys` and `RowActions`: the visible frame,
+the pointer and the focused window's frame all arrive as values, so every anchor and every clamp is testable without
+a screen. `theme.position` picks the anchor and `theme.screen` the display; `offset_x`/`offset_y` are applied to the
+anchor and then clamped with it, which is what makes it impossible for a config to place the card off-screen.
+`active-window` and `screen = "active"` resolve through `FocusedWindow.frame()` (`SystemServices.swift`), an
+Accessibility lookup that returns nil rather than guessing and drops those choices back to the pointer.
+
+Both the pointer and that lookup are captured in `captureAnchors()` **once per showing**, not per resize:
+`resizeToContent` runs on every keystroke, an Accessibility call is cross-process, and re-reading the pointer would let
+the panel crawl after the mouse — or hop displays — while the user types into it.
+
 `NSTableView` uses `selectionHighlightStyle = .none`; selection is painted manually by
 `RowView.setSelected`, so `repaintSelection` must tell every realized row (`makeIfNecessary: false`)
 — scanning `visibleRect` instead misses everything before first layout. Row height is computed in

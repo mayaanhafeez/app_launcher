@@ -529,7 +529,10 @@ palette-seeded value in place rather than overriding it.
 | `width` | `380` | Minimum `220` |
 | `max_height` | `0.6` | Fraction (0–1) of the screen height the panel may grow to before scrolling |
 | `border_width` | `1` | |
-| `offset_y` | `28` | Offset above screen centre |
+| `position` | `"center"` | Anchor: `center`, `top`, `mouse` (hangs below the pointer), `active-window` (centres on the focused window, falling back to `mouse`) |
+| `screen` | `"mouse"` | Display: `mouse`, `main` (the menu-bar display), `active` (the one holding the focused window, falling back to `mouse`) |
+| `offset_x` | `0` | Nudge from the anchor, in screen coordinates |
+| `offset_y` | `28` | Nudge from the anchor; positive is **up**, so the default raises the `center` anchor. Both offsets are clamped to the visible frame, so no value here can push the card off-screen |
 | `spacing_scale` | `1.0` | Multiplies every spacing token below |
 | `panel_padding` | `12` | Inset on every edge, unless overridden per-edge |
 | `padding_top` | (= `panel_padding`) | |
