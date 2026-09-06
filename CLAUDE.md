@@ -106,6 +106,16 @@ The `eval` matters just as much: piping the decoded script into a shell puts it 
 multi-line script had `read` swallow its own next line). `eval` runs it in the Terminal window's own shell, which
 leaves stdin on the tty — and because that shell is interactive, it is also what makes zsh print `read`'s `?prompt`.
 
+`terminalLaunch(_:spec:)` decides *where* that script goes, and the two families it returns are not variants of one
+command line. Terminal and iTerm are **scripted** — `do script` / `write text` puts the command into a window already
+running an interactive shell, which is the whole reason the encoding above exists. Every other terminal is **spawned**
+through `open -na <app> --args`, where argv is exact and the command needs no encoding at all; the `-i` in the default
+`-e {shell} -ic {command}` is what keeps prompts printing there. Adding a terminal means adding a line to
+`TerminalSpec.knownArguments`, not a code path, and `args` in the config is the escape hatch for one that isn't listed.
+The spec is held in a process-wide `activeTerminal()` rather than on `LuaRuntime` because `terminalRun` is a bare C
+function pointer with nowhere to hang a reference — `publishSettings` replaces it on every reload, including the
+`Settings()` a missing config publishes, which is what puts Terminal.app back.
+
 `{query}` substitution lives on `ScriptAction.resolved(query:)` and escapes per destination —
 single-quoted for shell, percent-encoded for URLs, backslash-escaped for AppleScript. Lua
 `action` handlers get the query as their first argument. A blank target is a no-op: handing an

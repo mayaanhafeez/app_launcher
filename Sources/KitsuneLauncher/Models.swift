@@ -304,6 +304,46 @@ struct CommandSpec: Sendable, Equatable {
     var login = false
 }
 
+/// Which terminal a `shell = ...` entry opens in, from `terminal = ...` in
+/// config.lua. Terminal.app was hardcoded before this existed, which — by the same
+/// argument the theme is built on — made the one thing every `shell` row touches a
+/// value no user could reach.
+///
+/// Two families, and they are not variants of one command line. Terminal and iTerm
+/// are *scripted*: the command is typed into a window that already has an
+/// interactive shell on a tty, which is what keeps `read -r '?Prompt: '` working.
+/// Everything else is *spawned* through `open -na <app> --args`, where argv is
+/// exact and the terminal starts the shell itself.
+struct TerminalSpec: Sendable, Equatable {
+    /// The application name, as AppleScript and `open -a` know it: "Terminal",
+    /// "iTerm", "Ghostty", "WezTerm", "Alacritty", "kitty".
+    var app = "Terminal"
+    /// argv passed after `open -na <app> --args`, with `{command}` and `{shell}`
+    /// substituted. Empty means "look the app up in `knownArguments`", so this only
+    /// has to be written for a terminal Kitsune has no entry for — and setting it
+    /// forces the spawned path even for an app that would otherwise be scripted.
+    var arguments: [String] = []
+    /// The shell the spawned path runs the command in. Empty resolves to `$SHELL`,
+    /// falling back to `/bin/zsh`, at launch time rather than at decode time.
+    var shell = ""
+
+    /// The apps driven by AppleScript rather than by argv. Both have a way to put a
+    /// command into a live session; neither takes one on the command line.
+    static let scripted: Set<String> = ["terminal", "apple terminal", "iterm", "iterm2"]
+
+    /// argv templates for the terminals whose flags differ from the `-e` majority.
+    /// Adding a terminal means adding a line here, not a code path.
+    static let knownArguments: [String: [String]] = [
+        "kitty": ["{shell}", "-ic", "{command}"],
+        "wezterm": ["start", "--", "{shell}", "-ic", "{command}"],
+    ]
+
+    /// `-e <shell> -ic <command>` — Ghostty, Alacritty and most others. `-i` matters:
+    /// a non-interactive shell prints no prompts, so an interactive `read` in a
+    /// `shell = ...` entry would sit there silently.
+    static let defaultArguments = ["-e", "{shell}", "-ic", "{command}"]
+}
+
 /// Execution limits for Lua providers, from `providers = { ... }` in config.lua.
 struct ProviderSpec: Sendable, Equatable {
     /// Wall-clock deadline for one provider call.
@@ -335,6 +375,7 @@ struct Settings: Sendable {
     var apps = AppScanSpec()
     var menuBar = MenuBarSpec()
     var clipboard = ClipboardSpec()
+    var terminal = TerminalSpec()
 }
 
 // MARK: - Vim mode

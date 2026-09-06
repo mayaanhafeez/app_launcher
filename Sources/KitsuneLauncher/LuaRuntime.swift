@@ -51,26 +51,107 @@ private func luaString(_ state: OpaquePointer, _ index: Int32) -> String? {
     return String(cString: pointer)
 }
 
+/// The command, wrapped so a scripted terminal can be handed one word. The decoded
+/// script is `eval`-ed in the window's own shell rather than piped into a new one.
+/// Piping puts the script on stdin, which is the very thing `read` reads from: a
+/// one-line `read -r '?Formula: ' name; brew install $name` saw EOF and installed
+/// nothing, and a multi-line script had `read` swallow its own next line. `eval`
+/// leaves stdin on the tty, and because that shell is interactive it is also what
+/// makes zsh print `read`'s `?prompt` at all.
+///
+/// The spawned path needs none of this — `open --args` carries argv exactly — so the
+/// encoding lives here rather than in `terminalLaunch`.
+private func evalPayload(_ command: String) -> String {
+    "eval \"$(printf %s \(Data(command.utf8).base64EncodedString()) | base64 -D)\""
+}
+
 /// Internal rather than private so the encoding contract below can be tested
 /// directly: the shipped bug this guards against is invisible from the outside,
 /// since `launchTerminal` only ever hands the string to `osascript`.
 func terminalScript(_ command: String) -> String {
-    let encoded = Data(command.utf8).base64EncodedString()
-    // The decoded script is `eval`-ed in the window's own shell rather than piped
-    // into a new one. Piping puts the script on stdin, which is the very thing
-    // `read` reads from: a one-line `read -r '?Formula: ' name; brew install $name`
-    // saw EOF and installed nothing, and a multi-line script had `read` swallow its
-    // own next line. `eval` leaves stdin on the tty, and because that shell is
-    // interactive it is also what makes zsh print `read`'s `?prompt` at all.
-    let shell = "eval \"$(printf %s \(encoded) | base64 -D)\""
-    return "tell application \"Terminal\"\nactivate\ndo script \"\(ScriptAction.appleScriptQuoted(shell))\"\nend tell"
+    "tell application \"Terminal\"\nactivate\ndo script \"\(ScriptAction.appleScriptQuoted(evalPayload(command)))\"\nend tell"
+}
+
+/// iTerm has no `do script`. `write text` is its equivalent — it types the line into
+/// a session that is already running the user's interactive shell, so the tty and
+/// `read` behave exactly as they do in Terminal.
+func iTermScript(_ command: String) -> String {
+    let quoted = ScriptAction.appleScriptQuoted(evalPayload(command))
+    return """
+    tell application "iTerm"
+    activate
+    set kitsuneWindow to (create window with default profile)
+    tell current session of kitsuneWindow to write text "\(quoted)"
+    end tell
+    """
+}
+
+/// Where a `shell = ...` command is sent, and how. Kept a value — like `ScriptAction`
+/// and `RowAction` — so the whole mapping from a `TerminalSpec` to a process is
+/// testable without spawning one.
+enum TerminalLaunch: Equatable, Sendable {
+    /// AppleScript source for `/usr/bin/osascript`.
+    case appleScript(String)
+    /// argv for `/usr/bin/open`. Exact, so the command needs no quoting at all.
+    case open([String])
+}
+
+/// The login shell for the spawned path. Resolved here rather than baked into
+/// `TerminalSpec()`'s default so the spec stays a plain value.
+private func loginShell() -> String {
+    let shell = ProcessInfo.processInfo.environment["SHELL"] ?? ""
+    return shell.isEmpty ? "/bin/zsh" : shell
+}
+
+func terminalLaunch(_ command: String, spec: TerminalSpec) -> TerminalLaunch {
+    let name = spec.app.lowercased()
+    // An explicit `args` is what forces the spawned path: a user who wrote an argv
+    // template for an app meant it to be used, even for one Kitsune would script.
+    if spec.arguments.isEmpty, TerminalSpec.scripted.contains(name) {
+        return .appleScript(name.hasPrefix("iterm") ? iTermScript(command) : terminalScript(command))
+    }
+    let template = spec.arguments.isEmpty
+        ? (TerminalSpec.knownArguments[name] ?? TerminalSpec.defaultArguments)
+        : spec.arguments
+    let shell = spec.shell.isEmpty ? loginShell() : spec.shell
+    let argv = template.map {
+        $0.replacingOccurrences(of: "{shell}", with: shell)
+            .replacingOccurrences(of: "{command}", with: command)
+    }
+    // `-n`: a new window even when the app is already running, which is what the
+    // scripted path does too.
+    return .open(["-na", spec.app, "--args"] + argv)
+}
+
+/// The terminal every `shell = ...` opens in, held process-wide. `terminalRun` is a
+/// bare C function pointer with nowhere to hang a reference, and `invoke(scriptAction:)`
+/// has to read the same value, so the spec lives here and every settings publish
+/// replaces it.
+private let terminalSpecLock = NSLock()
+nonisolated(unsafe) private var terminalSpecStorage = TerminalSpec()
+
+func setActiveTerminal(_ spec: TerminalSpec) {
+    terminalSpecLock.lock(); defer { terminalSpecLock.unlock() }
+    terminalSpecStorage = spec
+}
+
+func activeTerminal() -> TerminalSpec {
+    terminalSpecLock.lock(); defer { terminalSpecLock.unlock() }
+    return terminalSpecStorage
 }
 
 private func launchTerminal(_ command: String) {
-    NSLog("KitsuneLauncher terminal: %@", command)
+    let spec = activeTerminal()
+    NSLog("KitsuneLauncher terminal (%@): %@", spec.app, command)
     let task = Process()
-    task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-    task.arguments = ["-e", terminalScript(command)]
+    switch terminalLaunch(command, spec: spec) {
+    case .appleScript(let source):
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        task.arguments = ["-e", source]
+    case .open(let argv):
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        task.arguments = argv
+    }
     do { try task.run() } catch { NSLog("KitsuneLauncher terminal failed: %@", error.localizedDescription) }
 }
 
@@ -371,6 +452,23 @@ final class LuaRuntime: @unchecked Sendable {
         }
         lua_settop(state, -2)
 
+        // Which terminal a `shell = ...` entry opens in. `terminal = "Ghostty"` is the
+        // short form; the table form adds an argv template for one Kitsune has no
+        // entry for. Decoded before `hotkey`, whose guard returns early.
+        lua_getfield(state, -1, "terminal")
+        if let app = luaString(state, -1), !app.isEmpty {
+            settings.terminal.app = app
+        } else if lua_type(state, -1) == LUA_TTABLE {
+            lua_getfield(state, -1, "app")
+            if let app = luaString(state, -1), !app.isEmpty { settings.terminal.app = app }
+            lua_settop(state, -2)
+            if let args = stringList(state, field: "args") { settings.terminal.arguments = args }
+            lua_getfield(state, -1, "shell")
+            if let shell = luaString(state, -1), !shell.isEmpty { settings.terminal.shell = shell }
+            lua_settop(state, -2)
+        }
+        lua_settop(state, -2)
+
         // `clipboard = false` is the default in all but name; the table form turns it
         // on and tunes it. Decoded before `hotkey`, whose guard returns early.
         lua_getfield(state, -1, "clipboard")
@@ -605,7 +703,13 @@ final class LuaRuntime: @unchecked Sendable {
     }
 
     private func publish(_ result: Result<[MenuNode], Error>) { DispatchQueue.main.async { [weak self] in self?.onReload?(result) } }
-    private func publishSettings(_ settings: Settings) { DispatchQueue.main.async { [weak self] in self?.onSettings?(settings) } }
+    /// The terminal spec is installed here rather than in `AppDelegate`, because the
+    /// thing that reads it is a C function pointer inside this file, and because a
+    /// missing config publishes `Settings()` — which has to put Terminal.app back.
+    private func publishSettings(_ settings: Settings) {
+        setActiveTerminal(settings.terminal)
+        DispatchQueue.main.async { [weak self] in self?.onSettings?(settings) }
+    }
 
     private static let defaultNodes = [
         MenuNode(id: "root", parent: "", kind: .menu, label: "Go", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: nil, order: 0),
