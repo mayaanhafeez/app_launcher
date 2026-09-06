@@ -523,6 +523,14 @@ extension Theme {
     var chevronColor: NSColor { fg.withAlphaComponent(chevronAlpha) }
     var dividerColor: NSColor { fg.withAlphaComponent(dividerAlpha) }
 
+    /// `blur = 0` means *no effect view*, not a transparent one: the card paints
+    /// `cardBackground` over a clear window either way, so switching the material off
+    /// must never touch the alpha of anything the card is drawn in.
+    var showsBlur: Bool { blur > 0 }
+    var blurMaterial: NSVisualEffectView.Material {
+        blur > 0.66 ? .hudWindow : (blur > 0.33 ? .menu : .windowBackground)
+    }
+
     var headerHeight: CGFloat { max(space(30), headingSize + space(12)) }
     /// Leading edge of the label column: icon slot plus its gutters.
     var labelInset: CGFloat { space(rowPaddingX) + space(iconSlot) + space(iconGap) }

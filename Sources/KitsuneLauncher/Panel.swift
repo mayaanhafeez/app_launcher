@@ -37,6 +37,9 @@ final class LauncherTable: NSTableView {
 
 @MainActor
 final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
+    /// The effect view is a *sibling* behind the card, never its superview: hiding a
+    /// superview hides the card with it, which is what `blur = 0` used to do.
+    private let container = NSView()
     private let blur = NSVisualEffectView()
     private let card = NSView()
     private let input = LauncherField()
@@ -221,8 +224,8 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
 
     func apply(theme: Theme) {
         self.theme = theme
-        blur.material = theme.blur > 0.66 ? .hudWindow : (theme.blur > 0.33 ? .menu : .windowBackground)
-        blur.alphaValue = theme.blur <= 0 ? 0 : 1
+        blur.material = theme.blurMaterial
+        blur.isHidden = !theme.showsBlur
         // The effect view fills the whole window, so without a mask its square material
         // stays visible in the four corners the card rounds away.
         blur.maskImage = Self.roundedMask(radius: theme.radius)
@@ -533,10 +536,11 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
     private func buildUI(_ panel: NSPanel) {
         blur.state = .active
         blur.blendingMode = .behindWindow
-        panel.contentView = blur
+        panel.contentView = container
         blur.wantsLayer = true
         card.wantsLayer = true
-        [card].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; blur.addSubview($0) }
+        // Order matters: the effect view is added first so the card draws over it.
+        [blur, card].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; container.addSubview($0) }
         [input, scroll, emptyLabel, notice, modeLabel].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; card.addSubview($0) }
 
         input.isBordered = false
@@ -589,8 +593,10 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
         modeWidth = modeLabel.widthAnchor.constraint(equalToConstant: 48)
 
         NSLayoutConstraint.activate([
-            card.leadingAnchor.constraint(equalTo: blur.leadingAnchor), card.trailingAnchor.constraint(equalTo: blur.trailingAnchor),
-            card.topAnchor.constraint(equalTo: blur.topAnchor), card.bottomAnchor.constraint(equalTo: blur.bottomAnchor),
+            blur.leadingAnchor.constraint(equalTo: container.leadingAnchor), blur.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            blur.topAnchor.constraint(equalTo: container.topAnchor), blur.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            card.leadingAnchor.constraint(equalTo: container.leadingAnchor), card.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            card.topAnchor.constraint(equalTo: container.topAnchor), card.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             inputTop, inputLeading, inputTrailing, inputHeight,
             scrollTop, scrollLeading, scrollTrailing, scrollBottom,
             emptyLabel.centerXAnchor.constraint(equalTo: card.centerXAnchor), emptyLabel.centerYAnchor.constraint(equalTo: scroll.centerYAnchor),
