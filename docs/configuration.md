@@ -367,6 +367,39 @@ re-scan, and a scan **replaces** the index rather than merging into it, so
 removing a path (or deleting an app) removes it from the list on the next
 reload.
 
+### `files`
+
+```lua
+files = { enabled = true, show_hidden = false, limit = 40 },   -- defaults
+```
+
+A query starting with `/` or `~` at the **top level** stops being a menu search
+and becomes a directory listing. `~/dev/pro` enumerates `~/dev` and filters it by
+`pro`; the prompt shows the directory you are in, directories come first, and
+each row carries the file's Finder icon.
+
+- **Return on a directory** extends the query by that component and keeps
+  browsing, so `~/dev/` → `~/dev/projects/` → … walks down the tree. What you
+  typed is extended, not replaced, so a `~/`-rooted query stays `~/`-rooted.
+- **Return on a file** opens it with `NSWorkspace`. A `.app` opens rather than
+  being browsed into, the same way the app scan refuses to descend into a bundle.
+- **Tab** opens the usual row actions — Reveal in Finder, Copy Path, Open With —
+  for files *and* directories.
+
+Dotfiles are hidden unless `show_hidden = true`, or unless the fragment you are
+typing starts with a `.`, which is the only reason anyone types one. `limit` caps
+how many entries a listing shows: a home directory is fine, `/usr/bin` is a
+thousand rows nobody is going to read.
+
+Only the top level does this. Inside a submenu a leading slash is just text to
+match, and `files = false` switches the whole thing off.
+
+The listing is read off the main thread under the same generation guard providers
+use, so a slow directory — a network mount, a folder with thousands of entries —
+cannot block a keystroke, and a listing you have already typed past is dropped
+rather than drawn. It is *not* reported by `kitsunectl list`, for the same reason
+provider rows are not: that is a synchronous snapshot of the static list.
+
 ### `clipboard`
 
 ```lua

@@ -44,6 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             panel.vimEnabled = settings.vimMode
             menu.backRow = settings.back
             menu.search = settings.search
+            menu.files = settings.files
             menu.providerLimits = settings.providers
             menu.commands.spec = settings.commands
             usage.spec = settings.ranking

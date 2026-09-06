@@ -144,6 +144,26 @@ An `NSMetadataQuery` for app bundles used to live here and was removed: nothing 
 methods), so its results were never consumed. Wiring Spotlight back up means adding those notification observers — and
 keeping the directory scan regardless, since Spotlight indexes nothing under `/System`.
 
+### Filesystem path mode
+
+`FileBrowser` (`FileBrowser.swift`) is the third async row source, beside providers and commands. A query starting `/`
+or `~` **at `root`** stops being a menu search and becomes a directory listing — `build` returns an empty base list plus
+the directory as the title, and the rows arrive from a background queue under the same `providerGeneration` guard, so a
+slow directory cannot block a keystroke and a listing the user has typed past is dropped rather than drawn. Only `root`
+does this: inside a submenu a leading slash is text to match, and has to stay that way.
+
+`PathQuery` splits the query at its **last separator** — that is the whole trick, since it makes every keystroke after
+the separator a filter of one already-known directory rather than another walk of the disk. It keeps the typed `prefix`
+alongside the expanded `directory` because browsing *extends what was typed*: a `~/`-rooted query has to stay
+`~/`-rooted rather than turning into `/Users/…` under the user mid-type.
+
+Every row carries `.open(path)` — **directories too** — which is what gives the actions menu Reveal in Finder, Copy Path
+and Open With here with no new `RowAction` case. `activate` therefore checks the directory case *before* the `action`
+dispatch, or Return on a folder would open it in the Finder instead of browsing into it. A package is not browsable
+(`isFilePackage`), on the same argument that stops `AppIndex` descending into a bundle.
+
+Rows are absent from `kitsunectl list` for the same reason provider rows are: that is a synchronous snapshot.
+
 ### Clipboard history
 
 `ClipboardHistory` (`ClipboardHistory.swift`) is a native row source with memory, for the two reasons `UsageStore`

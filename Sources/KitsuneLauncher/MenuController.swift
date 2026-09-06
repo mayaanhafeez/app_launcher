@@ -20,8 +20,10 @@ final class MenuController {
     /// second can repaint the list without discarding what the first one returned.
     private var providerRows: [DisplayRow] = []
     private var commandRows: [DisplayRow] = []
+    private var fileRows: [DisplayRow] = []
     /// Republished on every config reload, like `backRow`.
     var search = SearchSpec()
+    var files = FileSpec()
     var providerLimits = ProviderSpec()
     private var location: MenuLocation = .menu("root")
     private var navigation: [Frame] = []
@@ -126,6 +128,14 @@ final class MenuController {
             onDismiss?()
             return
         }
+        // A directory browses rather than opens: Return extends the query and the list
+        // re-enumerates. Checked before the action dispatch, because a path row also
+        // carries `.open(path)` — that is what gives its actions menu Reveal in Finder
+        // and Copy Path, and a folder must not be *opened* by Return on the way past.
+        if row.kind == .menu, FileBrowser.path(for: row) != nil {
+            browse(into: row.label)
+            return
+        }
         // Actions-menu rows are handled by the host itself, and carry no node to look
         // up any more than a provider row does.
         if let rowAction = row.rowAction {
@@ -185,6 +195,16 @@ final class MenuController {
         let entries = RowActions.entries(for: row, query: query)
         guard !entries.isEmpty else { return }
         push(.actions(subject: row, entries: entries), restoring: query)
+    }
+
+    /// Extends the typed path by one component. Built from the query's own prefix
+    /// rather than the row's absolute path, so a `~/`-rooted query stays `~/`-rooted
+    /// instead of turning into `/Users/...` under the user mid-type.
+    private func browse(into name: String) {
+        guard let path = PathQuery(query) else { return }
+        let next = path.prefix + name + "/"
+        onQuery?(next)
+        refresh(query: next)
     }
 
     private func push(_ next: MenuLocation, restoring: String?) {
@@ -292,6 +312,11 @@ final class MenuController {
     /// reads `activeMenu` nowhere, which is what lets `rows(route:query:)` answer for
     /// any route without disturbing what the panel is showing.
     private func build(menu: String, query: String) -> (title: String, rows: [DisplayRow]) {
+        // A path *takes over* the list rather than joining it: apps and menu nodes are
+        // not what `~/dev/` means. The rows themselves are enumerated off the main
+        // thread and arrive like a provider's, so all this reports is the takeover and
+        // where it is pointing.
+        if let path = pathQuery(menu: menu, query: query) { return (path.title, []) }
         let menuNode = nodes.first(where: { $0.id == menu })
         let title = menuNode?.headerTitle ?? "Go"
         var rows: [DisplayRow] = []
@@ -351,6 +376,13 @@ final class MenuController {
         return (title, rows)
     }
 
+    /// A query is only a path at `root`, and only when the feature is on. Inside a
+    /// submenu a leading slash is just text to match, and it has to stay that way.
+    private func pathQuery(menu: String, query: String) -> PathQuery? {
+        guard files.enabled, menu == "root" else { return nil }
+        return PathQuery(query)
+    }
+
     /// Direct children first, then everything found by drilling down, then the rows
     /// that survive the filter on purpose. `keep` sorting last is what leaves it below
     /// the search results and — since provider rows are appended after this list — above
@@ -379,13 +411,30 @@ final class MenuController {
         let generation = providerGeneration
         providerRows = []
         commandRows = []
+        fileRows = []
         let node = nodes.first(where: { $0.id == menu })
 
         // Both sources are asynchronous and either may answer first, so each stores
         // its own rows and re-emits the union rather than the base plus itself.
         let emit: @MainActor () -> Void = { [weak self] in
             guard let self, generation == self.providerGeneration else { return }
-            self.onRows?(title, self.decorated(baseRows + self.providerRows + self.commandRows, menu: menu))
+            self.onRows?(title, self.decorated(baseRows + self.fileRows + self.providerRows + self.commandRows, menu: menu))
+        }
+
+        // Reading a directory can block — a network mount, a folder with thousands of
+        // entries — so it happens off the main thread under the same generation guard
+        // the providers use, and a listing the user has already typed past is dropped
+        // rather than drawn.
+        if let path = pathQuery(menu: menu, query: trimmed) {
+            let spec = files
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                let rows = FileBrowser.rows(for: path, spec: spec)
+                DispatchQueue.main.async {
+                    guard let self, generation == self.providerGeneration else { return }
+                    self.fileRows = rows
+                    emit()
+                }
+            }
         }
 
         if let name = node?.provider {
