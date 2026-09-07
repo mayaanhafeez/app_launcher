@@ -106,6 +106,16 @@ The `eval` matters just as much: piping the decoded script into a shell puts it 
 multi-line script had `read` swallow its own next line). `eval` runs it in the Terminal window's own shell, which
 leaves stdin on the tty — and because that shell is interactive, it is also what makes zsh print `read`'s `?prompt`.
 
+`terminalLaunch(_:spec:)` decides *where* that script goes, and the two families it returns are not variants of one
+command line. Terminal and iTerm are **scripted** — `do script` / `write text` puts the command into a window already
+running an interactive shell, which is the whole reason the encoding above exists. Every other terminal is **spawned**
+through `open -na <app> --args`, where argv is exact and the command needs no encoding at all; the `-i` in the default
+`-e {shell} -ic {command}` is what keeps prompts printing there. Adding a terminal means adding a line to
+`TerminalSpec.knownArguments`, not a code path, and `args` in the config is the escape hatch for one that isn't listed.
+The spec is held in a process-wide `activeTerminal()` rather than on `LuaRuntime` because `terminalRun` is a bare C
+function pointer with nowhere to hang a reference — `publishSettings` replaces it on every reload, including the
+`Settings()` a missing config publishes, which is what puts Terminal.app back.
+
 `{query}` substitution lives on `ScriptAction.resolved(query:)` and escapes per destination —
 single-quoted for shell, percent-encoded for URLs, backslash-escaped for AppleScript. Lua
 `action` handlers get the query as their first argument. A blank target is a no-op: handing an
@@ -124,6 +134,15 @@ vnode event only fires when an entry is added, removed or renamed — rewriting 
 directory, so a directory-only watch silently misses those saves. File watches are re-armed after
 every event because an editor that saves via rename leaves the old descriptor on a dead inode.
 A second watcher covers `~/.config/theme` so `palette = "auto"` retints when `set-theme` switches.
+
+The watch is **recursive**, because `package.path` makes a config a tree rather than two files: every `.lua` file below
+`~/.config/kitsune` is watched, and so is every directory holding one — an editor saving `plugins/git.lua` by rename
+touches `plugins/`, never the config root, so the root's own watch never sees it. Non-`.lua` files are skipped, hidden
+entries (a version-controlled config's `.git`) are not walked, and the walk is bounded by `maxDepth`/`maxWatches` so a
+repository dropped under the config directory costs a fixed number of descriptors. The tree is re-walked on every event
+rather than enumerated once at `start()`, which is what picks up a `plugins/` directory created after launch.
+Recursion is tied to `watchesDirectory`: the `~/.config/theme` pointer watcher is aimed at the whole of `~/.config`,
+and walking that would watch every dotfile directory the user owns.
 
 ### App index
 
@@ -193,9 +212,25 @@ by two paths that must stay in sync: `control(_:textView:doCommandBy:)` for stan
 `LauncherField.performKeyEquivalent` → `routeKey` for raw key codes (53/125/126/36/76/123). Left-arrow and Escape only
 navigate back when the query is empty.
 
+The window's content view is a plain container holding **two siblings**: the `NSVisualEffectView` and, drawn over it,
+the card. The effect view used to be the card's superview, which made `blur = 0` (implemented as `alphaValue = 0`) hide
+the rows and the input along with the material. `blur = 0` now hides the effect view alone — the card paints
+`cardBackground` over a clear window either way, so the material is the only thing that switch is allowed to reach.
+
 The card is content-sized: `resizeToContent` sums the row heights and caps at `max_height` of the
 screen. It runs *before* `reloadData` in `update(title:rows:)`, because selection repainting walks
 realized rows and the table has none until laid out at its final height.
+
+**Where** it lands is `PanelPlacement` (`Models.swift`) — pure, like `VimKeys` and `RowActions`: the visible frame,
+the pointer and the focused window's frame all arrive as values, so every anchor and every clamp is testable without
+a screen. `theme.position` picks the anchor and `theme.screen` the display; `offset_x`/`offset_y` are applied to the
+anchor and then clamped with it, which is what makes it impossible for a config to place the card off-screen.
+`active-window` and `screen = "active"` resolve through `FocusedWindow.frame()` (`SystemServices.swift`), an
+Accessibility lookup that returns nil rather than guessing and drops those choices back to the pointer.
+
+Both the pointer and that lookup are captured in `captureAnchors()` **once per showing**, not per resize:
+`resizeToContent` runs on every keystroke, an Accessibility call is cross-process, and re-reading the pointer would let
+the panel crawl after the mouse — or hop displays — while the user types into it.
 
 `NSTableView` uses `selectionHighlightStyle = .none`; selection is painted manually by
 `RowView.setSelected`, so `repaintSelection` must tell every realized row (`makeIfNecessary: false`)

@@ -117,7 +117,8 @@ cp -r Config/plugins ~/.config/kitsune/
 - `~/.config/kitsune/theme.lua` — colors, spacing, typography. Runs in a separate,
   more restricted Lua state and can only restyle the panel, never touch the menu.
 - `~/.config/kitsune/plugins/`, `~/.config/kitsune/lua/` — anywhere else you `require`
-  from `config.lua`, the way a Neovim config splits across files.
+  from `config.lua`, the way a Neovim config splits across files. Saving any `.lua` file
+  below `~/.config/kitsune` reloads, so a split config hot-reloads like a single one.
 
 A missing `config.lua` falls back to a small built-in menu (Apps / System / Tools), so
 Kitsune is usable before you've written anything.

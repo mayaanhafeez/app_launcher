@@ -304,6 +304,46 @@ struct CommandSpec: Sendable, Equatable {
     var login = false
 }
 
+/// Which terminal a `shell = ...` entry opens in, from `terminal = ...` in
+/// config.lua. Terminal.app was hardcoded before this existed, which — by the same
+/// argument the theme is built on — made the one thing every `shell` row touches a
+/// value no user could reach.
+///
+/// Two families, and they are not variants of one command line. Terminal and iTerm
+/// are *scripted*: the command is typed into a window that already has an
+/// interactive shell on a tty, which is what keeps `read -r '?Prompt: '` working.
+/// Everything else is *spawned* through `open -na <app> --args`, where argv is
+/// exact and the terminal starts the shell itself.
+struct TerminalSpec: Sendable, Equatable {
+    /// The application name, as AppleScript and `open -a` know it: "Terminal",
+    /// "iTerm", "Ghostty", "WezTerm", "Alacritty", "kitty".
+    var app = "Terminal"
+    /// argv passed after `open -na <app> --args`, with `{command}` and `{shell}`
+    /// substituted. Empty means "look the app up in `knownArguments`", so this only
+    /// has to be written for a terminal Kitsune has no entry for — and setting it
+    /// forces the spawned path even for an app that would otherwise be scripted.
+    var arguments: [String] = []
+    /// The shell the spawned path runs the command in. Empty resolves to `$SHELL`,
+    /// falling back to `/bin/zsh`, at launch time rather than at decode time.
+    var shell = ""
+
+    /// The apps driven by AppleScript rather than by argv. Both have a way to put a
+    /// command into a live session; neither takes one on the command line.
+    static let scripted: Set<String> = ["terminal", "apple terminal", "iterm", "iterm2"]
+
+    /// argv templates for the terminals whose flags differ from the `-e` majority.
+    /// Adding a terminal means adding a line here, not a code path.
+    static let knownArguments: [String: [String]] = [
+        "kitty": ["{shell}", "-ic", "{command}"],
+        "wezterm": ["start", "--", "{shell}", "-ic", "{command}"],
+    ]
+
+    /// `-e <shell> -ic <command>` — Ghostty, Alacritty and most others. `-i` matters:
+    /// a non-interactive shell prints no prompts, so an interactive `read` in a
+    /// `shell = ...` entry would sit there silently.
+    static let defaultArguments = ["-e", "{shell}", "-ic", "{command}"]
+}
+
 /// Execution limits for Lua providers, from `providers = { ... }` in config.lua.
 struct ProviderSpec: Sendable, Equatable {
     /// Wall-clock deadline for one provider call.
@@ -335,6 +375,7 @@ struct Settings: Sendable {
     var apps = AppScanSpec()
     var menuBar = MenuBarSpec()
     var clipboard = ClipboardSpec()
+    var terminal = TerminalSpec()
 }
 
 // MARK: - Vim mode
@@ -432,6 +473,100 @@ enum EditingKeys {
     }
 }
 
+// MARK: - Placement
+
+/// Where the card sits on its display.
+enum PanelAnchor: String, Sendable, CaseIterable {
+    /// The historical placement: centred on the visible frame.
+    case center
+    /// Flush with the top of the visible frame, centred horizontally.
+    case top
+    /// Hanging below the pointer, the way a context menu does.
+    case mouse
+    /// Centred on the focused window, falling back to `.mouse` when the
+    /// Accessibility API has nothing to report.
+    case activeWindow = "active-window"
+}
+
+/// Which display the card lands on.
+enum PanelScreenChoice: String, Sendable, CaseIterable {
+    /// The display under the pointer — what the panel has always used.
+    case mouse
+    /// The primary display, the one holding the menu bar.
+    case main
+    /// The display holding the focused window, falling back to `.mouse`.
+    case active
+}
+
+/// The panel's geometry, resolved without touching AppKit: the caller supplies the
+/// visible frame, the pointer and the focused window, so every anchor and every
+/// clamp is testable without a screen.
+enum PanelPlacement {
+    /// The display to place the card on, as an index into `screens` — which is
+    /// `NSScreen.screens`, whose first element is the primary display. An empty or
+    /// unmatched lookup falls back to that primary display rather than to nothing.
+    static func screenIndex(
+        _ choice: PanelScreenChoice,
+        screens: [NSRect],
+        pointer: NSPoint,
+        focusedWindow: NSRect?
+    ) -> Int {
+        func index(containing point: NSPoint) -> Int? { screens.firstIndex { $0.contains(point) } }
+        switch choice {
+        case .main: return 0
+        case .mouse: return index(containing: pointer) ?? 0
+        case .active:
+            guard let focusedWindow else { return index(containing: pointer) ?? 0 }
+            // The centre rather than the origin: a window straddling two displays
+            // belongs to the one showing most of it.
+            return index(containing: NSPoint(x: focusedWindow.midX, y: focusedWindow.midY))
+                ?? index(containing: pointer) ?? 0
+        }
+    }
+
+    /// The card's frame: `size` anchored inside `visible`, nudged by `offset`, then
+    /// clamped so neither a large offset nor a small display can push it off-screen.
+    static func frame(
+        size: NSSize,
+        visible: NSRect,
+        anchor: PanelAnchor,
+        offset: CGPoint,
+        pointer: NSPoint,
+        focusedWindow: NSRect?
+    ) -> NSRect {
+        let width = min(size.width, visible.width)
+        let height = min(size.height, visible.height)
+        let centred = NSPoint(x: visible.midX - width / 2, y: visible.midY - height / 2)
+
+        var origin: NSPoint
+        switch anchor {
+        case .center:
+            origin = centred
+        case .top:
+            origin = NSPoint(x: centred.x, y: visible.maxY - height)
+        case .mouse:
+            // Top edge at the pointer, so the list grows downwards and the card's top
+            // stays put as rows come and go.
+            origin = NSPoint(x: pointer.x - width / 2, y: pointer.y - height)
+        case .activeWindow:
+            guard let focusedWindow else {
+                return frame(size: size, visible: visible, anchor: .mouse,
+                             offset: offset, pointer: pointer, focusedWindow: nil)
+            }
+            origin = NSPoint(x: focusedWindow.midX - width / 2, y: focusedWindow.midY - height / 2)
+        }
+
+        origin.x = (origin.x + offset.x).clamped(to: visible.minX...max(visible.minX, visible.maxX - width))
+        origin.y = (origin.y + offset.y).clamped(to: visible.minY...max(visible.minY, visible.maxY - height))
+        return NSRect(origin: NSPoint(x: origin.x.rounded(), y: origin.y.rounded()),
+                      size: NSSize(width: width.rounded(), height: height.rounded()))
+    }
+}
+
+private extension CGFloat {
+    func clamped(to range: ClosedRange<CGFloat>) -> CGFloat { Swift.min(Swift.max(self, range.lowerBound), range.upperBound) }
+}
+
 // MARK: - Theme
 
 /// Every value the panel draws with. Layout is native, so this token set *is* the
@@ -464,7 +599,14 @@ struct Theme: Sendable {
     /// Cap on panel height as a fraction of the visible screen.
     var maxHeight: CGFloat = 0.6
     var borderWidth: CGFloat = 1
+    /// Nudges applied to whichever anchor `position` resolves to, in screen
+    /// coordinates — positive `y` is up — and clamped along with it, so no offset can
+    /// push the card off the display. The default pairs with `.center` to reproduce
+    /// the placement the panel has always had.
+    var offsetX: CGFloat = 0
     var offsetY: CGFloat = 28
+    var position: PanelAnchor = .center
+    var screen: PanelScreenChoice = .mouse
 
     // Spacing, all multiplied by `spacingScale`
     var spacingScale: CGFloat = 1
@@ -522,6 +664,14 @@ extension Theme {
     var detailColor: NSColor { fgMuted.withAlphaComponent(detailAlpha) }
     var chevronColor: NSColor { fg.withAlphaComponent(chevronAlpha) }
     var dividerColor: NSColor { fg.withAlphaComponent(dividerAlpha) }
+
+    /// `blur = 0` means *no effect view*, not a transparent one: the card paints
+    /// `cardBackground` over a clear window either way, so switching the material off
+    /// must never touch the alpha of anything the card is drawn in.
+    var showsBlur: Bool { blur > 0 }
+    var blurMaterial: NSVisualEffectView.Material {
+        blur > 0.66 ? .hudWindow : (blur > 0.33 ? .menu : .windowBackground)
+    }
 
     var headerHeight: CGFloat { max(space(30), headingSize + space(12)) }
     /// Leading edge of the label column: icon slot plus its gutters.

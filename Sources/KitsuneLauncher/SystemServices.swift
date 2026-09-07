@@ -3,6 +3,37 @@ import Carbon
 import Darwin
 import ServiceManagement
 
+/// The frontmost window of the frontmost app, in AppKit screen coordinates, for the
+/// `active-window` / `active` placement choices. `nil` whenever the answer would be a
+/// guess — Accessibility not granted, no focused window, no screens — and the anchors
+/// fall back to the pointer rather than inventing a frame.
+///
+/// Accessibility is already required for the global hotkey, so this is normally
+/// available; the guard is for the window between launch and the user granting it.
+enum FocusedWindow {
+    static func frame() -> NSRect? {
+        guard AXIsProcessTrusted(), let primary = NSScreen.screens.first?.frame else { return nil }
+        let system = AXUIElementCreateSystemWide()
+        guard let app: AXUIElement = attribute(system, kAXFocusedApplicationAttribute),
+              let window: AXUIElement = attribute(app, kAXFocusedWindowAttribute),
+              let position: AXValue = attribute(window, kAXPositionAttribute),
+              let size: AXValue = attribute(window, kAXSizeAttribute) else { return nil }
+
+        var origin = CGPoint.zero
+        var extent = CGSize.zero
+        guard AXValueGetValue(position, .cgPoint, &origin), AXValueGetValue(size, .cgSize, &extent) else { return nil }
+        // Accessibility measures from the top-left of the primary display; AppKit
+        // measures from the bottom-left.
+        return NSRect(x: origin.x, y: primary.maxY - origin.y - extent.height, width: extent.width, height: extent.height)
+    }
+
+    private static func attribute<Value>(_ element: AXUIElement, _ name: String) -> Value? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success else { return nil }
+        return value as? Value
+    }
+}
+
 /// Launch at login, via the bundle's own `SMAppService`. There is no helper target
 /// and no legacy `SMLoginItemSetEnabled`: `mainApp` registers the app itself.
 ///
@@ -300,13 +331,29 @@ final class ConfigWatcher: @unchecked Sendable {
     var onChange: (() -> Void)?
 
     private let watchesDirectory: Bool
+    private let recursive: Bool
 
     private var debounce: TimeInterval = 0.08
 
-    init(directory: URL, filenames: [String] = ["config.lua", "theme.lua"], watchesDirectory: Bool = true) {
+    /// How far below the config directory the walk goes, and how many descriptors it
+    /// will hold open. A config directory is a handful of files; these are here so a
+    /// user who drops a repository (or a symlink loop) under `~/.config/kitsune`
+    /// costs a bounded number of open descriptors rather than the process's limit.
+    private static let maxDepth = 4
+    private static let maxWatches = 256
+
+    init(
+        directory: URL,
+        filenames: [String] = ["config.lua", "theme.lua"],
+        watchesDirectory: Bool = true,
+        recursive: Bool = true
+    ) {
         self.directory = directory
         self.filenames = filenames
         self.watchesDirectory = watchesDirectory
+        // Recursion is a walk of `directory`, which only makes sense for a watcher that
+        // owns it. The theme-pointer watcher points at the whole of `~/.config`.
+        self.recursive = recursive && watchesDirectory
     }
 
     /// Republished from `watch = { debounce }` on every config reload. Set on the
@@ -342,16 +389,58 @@ final class ConfigWatcher: @unchecked Sendable {
     /// Rewriting a file in place — `cat > config.lua`, or any editor that saves
     /// without a temp-file swap — never touches the directory, so each file is also
     /// watched directly. The file watches are re-armed after every event because an
-    /// editor that saves via rename leaves the old descriptor pointing at a dead inode.
+    /// editor that saves via rename leaves the old descriptor pointing at a dead inode,
+    /// and because that is also when the tree below the directory may have grown a file.
     private func rearmFileWatches() {
         fileSources.forEach { $0.cancel() }
-        fileSources = filenames.compactMap { name in
-            let descriptor = open(directory.appendingPathComponent(name).path, O_EVTONLY)
+        fileSources = watchedPaths().compactMap { path in
+            let descriptor = open(path, O_EVTONLY)
             guard descriptor >= 0 else { return nil }
             let source = makeSource(descriptor: descriptor)
             source.resume()
             return source
         }
+    }
+
+    /// `package.path` puts `plugins/` and `lua/` on the search path, so a config is a
+    /// tree rather than two files and a save anywhere in it has to reload. Every `.lua`
+    /// file below the directory is watched, **and so is every directory holding one**:
+    /// an editor saving `plugins/git.lua` by rename touches `plugins/`, never the
+    /// config root, so the root's own watch never sees it.
+    ///
+    /// The explicit `filenames` come first and unconditionally — they may not exist yet
+    /// (a fresh install has no `config.lua`), and the `~/.config/theme` pointer has no
+    /// `.lua` extension to be found by.
+    private func watchedPaths() -> [String] {
+        var paths = filenames.map { directory.appendingPathComponent($0).path }
+        guard recursive else { return paths }
+        var seen = Set(paths)
+        var pending: [(url: URL, depth: Int)] = [(directory, 0)]
+
+        while !pending.isEmpty, paths.count < Self.maxWatches {
+            let (url, depth) = pending.removeFirst()
+            // `.skipsHiddenFiles` keeps a version-controlled config's `.git` out of it,
+            // which would otherwise be most of the descriptors and all of the churn.
+            let entries = (try? FileManager.default.contentsOfDirectory(
+                at: url,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            )) ?? []
+
+            for entry in entries where paths.count < Self.maxWatches {
+                let isDirectory = (try? entry.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+                if isDirectory {
+                    guard depth < Self.maxDepth else { continue }
+                    pending.append((entry, depth + 1))
+                } else if entry.pathExtension != "lua" {
+                    continue
+                }
+                // The config directory itself already has `directorySource`.
+                guard entry.path != directory.path, seen.insert(entry.path).inserted else { continue }
+                paths.append(entry.path)
+            }
+        }
+        return paths
     }
 
     private func scheduleChange() {
