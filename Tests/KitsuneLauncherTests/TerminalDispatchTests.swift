@@ -76,3 +76,80 @@ private func decodedPayload(_ script: String) -> String? {
     }
     #expect(decodedPayload(terminalScript(command)) == "brew install 'it'\\''s fine'")
 }
+
+// Where that script is sent, once `terminal = ...` can move it. The two families are
+// asserted separately because they carry the command by different means: AppleScript
+// through a base64 payload inside a string literal, `open --args` through argv.
+
+@Test func defaultSpecStillDrivesTerminalApp() {
+    guard case .appleScript(let source) = terminalLaunch("echo hi", spec: TerminalSpec()) else {
+        Issue.record("expected the scripted path"); return
+    }
+    #expect(source == terminalScript("echo hi"))
+}
+
+@Test func iTermIsScriptedThroughWriteText() {
+    // iTerm has no `do script`. `write text` puts the line into a session already
+    // running the interactive shell, so the tty contract is the same one Terminal has.
+    for name in ["iTerm", "iterm2"] {
+        guard case .appleScript(let source) = terminalLaunch("brew install jq", spec: TerminalSpec(app: name)) else {
+            Issue.record("expected the scripted path for \(name)"); return
+        }
+        #expect(source.contains("tell application \"iTerm\""))
+        #expect(source.contains("write text \"eval "))
+        #expect(decodedPayload(source) == "brew install jq")
+    }
+}
+
+@Test func spawnedTerminalCarriesTheCommandAsOneArgument() {
+    // The whole point of the `open --args` path: argv is exact, so a command with
+    // quotes, a newline and a pipe needs no encoding and cannot be re-split.
+    let command = "read -r '?Formula: ' name\necho \"got $name\" | cat"
+    guard case .open(let argv) = terminalLaunch(command, spec: TerminalSpec(app: "Ghostty", shell: "/bin/zsh")) else {
+        Issue.record("expected the spawned path"); return
+    }
+    #expect(argv == ["-na", "Ghostty", "--args", "-e", "/bin/zsh", "-ic", command])
+}
+
+@Test func knownTerminalsGetTheirOwnArgv() {
+    // kitty takes the program positionally and wezterm needs `start --`; everything
+    // else is the `-e` majority. A terminal Kitsune has never heard of gets that.
+    guard case .open(let kitty) = terminalLaunch("ls", spec: TerminalSpec(app: "kitty", shell: "/bin/zsh")),
+          case .open(let wezterm) = terminalLaunch("ls", spec: TerminalSpec(app: "WezTerm", shell: "/bin/zsh")),
+          case .open(let unknown) = terminalLaunch("ls", spec: TerminalSpec(app: "Rio", shell: "/bin/zsh")) else {
+        Issue.record("expected the spawned path"); return
+    }
+    #expect(kitty == ["-na", "kitty", "--args", "/bin/zsh", "-ic", "ls"])
+    #expect(wezterm == ["-na", "WezTerm", "--args", "start", "--", "/bin/zsh", "-ic", "ls"])
+    #expect(unknown == ["-na", "Rio", "--args", "-e", "/bin/zsh", "-ic", "ls"])
+}
+
+@Test func explicitArgumentsWinOverTheScriptedPath() {
+    // An argv template written by hand is a statement of intent: use it even for an
+    // app that would otherwise be driven by AppleScript.
+    let spec = TerminalSpec(app: "Terminal", arguments: ["--profile", "{shell}", "{command}"], shell: "/bin/bash")
+    guard case .open(let argv) = terminalLaunch("ls", spec: spec) else {
+        Issue.record("expected the spawned path"); return
+    }
+    #expect(argv == ["-na", "Terminal", "--args", "--profile", "/bin/bash", "ls"])
+}
+
+@Test func anEmptyShellResolvesToALoginShell() {
+    // Resolved at launch, not at decode: `TerminalSpec()` stays a plain value that a
+    // test can compare, and the user's $SHELL is read when the window is opened.
+    guard case .open(let argv) = terminalLaunch("ls", spec: TerminalSpec(app: "Ghostty")) else {
+        Issue.record("expected the spawned path"); return
+    }
+    #expect(argv[4].hasPrefix("/"))
+    #expect(!argv[4].isEmpty)
+}
+
+@Test func interactiveShellFlagIsKept() {
+    // `-i` is load-bearing for the same reason `eval` is on the scripted path: a
+    // non-interactive shell prints no prompt, so `read -r '?Formula: '` would sit
+    // there silently.
+    guard case .open(let argv) = terminalLaunch("ls", spec: TerminalSpec(app: "Ghostty")) else {
+        Issue.record("expected the spawned path"); return
+    }
+    #expect(argv.contains("-ic"))
+}

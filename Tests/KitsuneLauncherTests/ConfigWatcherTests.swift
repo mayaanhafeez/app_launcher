@@ -9,10 +9,16 @@ import Testing
 private func startedWatcher(
     in directory: URL,
     filenames: [String] = ["config.lua", "theme.lua"],
-    watchesDirectory: Bool = true
+    watchesDirectory: Bool = true,
+    recursive: Bool = true
 ) throws -> (watcher: ConfigWatcher, changes: Locked<Int>) {
     let changes = Locked(0)
-    let watcher = ConfigWatcher(directory: directory, filenames: filenames, watchesDirectory: watchesDirectory)
+    let watcher = ConfigWatcher(
+        directory: directory,
+        filenames: filenames,
+        watchesDirectory: watchesDirectory,
+        recursive: recursive
+    )
     watcher.onChange = { changes.value += 1 }
     try watcher.start()
     return (watcher, changes)
@@ -104,4 +110,111 @@ private func settle() async { try? await Task.sleep(nanoseconds: 200_000_000) }
     // does catch.
     try "return { items = {} }".write(to: directory.appendingPathComponent("config.lua"), atomically: true, encoding: .utf8)
     #expect(await kitsuneWaitUntil(timeout: 3) { changes.value > 0 })
+}
+
+// MARK: - The tree below config.lua
+
+/// Lays out `relative` under `directory`, creating the intermediate directories a
+/// split config brings with it.
+private func write(_ contents: String, to relative: String, in directory: URL) throws -> URL {
+    let url = directory.appendingPathComponent(relative)
+    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try contents.write(to: url, atomically: true, encoding: .utf8)
+    return url
+}
+
+@Test func watcherFiresOnASaveInsideAPluginDirectory() async throws {
+    // `plugins/` is on package.path, so `require "plugins.git"` is a config file in
+    // every sense that matters — and saving it in place touches neither the config
+    // directory nor either of the two named files.
+    let directory = kitsuneTemporaryDirectory("kitsune-watch")
+    defer { kitsuneRemove(directory) }
+    try "return { items = {} }".write(to: directory.appendingPathComponent("config.lua"), atomically: true, encoding: .utf8)
+    let plugin = try write("return {}", to: "plugins/git.lua", in: directory)
+
+    let (watcher, changes) = try startedWatcher(in: directory)
+    defer { _ = watcher }
+    await settle()
+    #expect(changes.value == 0)
+
+    try kitsuneRewriteInPlace(plugin, "return { items = { { id = 'git', label = 'Git' } } }")
+    #expect(await kitsuneWaitUntil(timeout: 3) { changes.value > 0 })
+}
+
+@Test func watcherFollowsANestedRequirePath() async throws {
+    // `lua/?/init.lua` is on the search path too, so the tree can be a few levels deep
+    // before it stops being a config.
+    let directory = kitsuneTemporaryDirectory("kitsune-watch")
+    defer { kitsuneRemove(directory) }
+    try "return { items = {} }".write(to: directory.appendingPathComponent("config.lua"), atomically: true, encoding: .utf8)
+    let module = try write("return {}", to: "lua/util/text/init.lua", in: directory)
+
+    let (watcher, changes) = try startedWatcher(in: directory)
+    defer { _ = watcher }
+    await settle()
+    #expect(changes.value == 0)
+
+    try kitsuneRewriteInPlace(module, "return { trim = function(s) return s end }")
+    #expect(await kitsuneWaitUntil(timeout: 3) { changes.value > 0 })
+}
+
+@Test func watcherSeesAPluginDirectoryAddedAfterItStarted() async throws {
+    // Nothing but config.lua exists at start, so the tree has to be re-walked on every
+    // event rather than enumerated once.
+    let directory = kitsuneTemporaryDirectory("kitsune-watch")
+    defer { kitsuneRemove(directory) }
+    try "return { items = {} }".write(to: directory.appendingPathComponent("config.lua"), atomically: true, encoding: .utf8)
+
+    let (watcher, changes) = try startedWatcher(in: directory)
+    defer { _ = watcher }
+    await settle()
+
+    // Creating `plugins/git.lua` is a directory event on the config root, which the
+    // root watch catches on its own.
+    let plugin = try write("return {}", to: "plugins/git.lua", in: directory)
+    #expect(await kitsuneWaitUntil(timeout: 3) { changes.value > 0 })
+
+    // The point of the re-walk: the *next* in-place save of that new file is seen too.
+    await settle()
+    let seen = changes.value
+    try kitsuneRewriteInPlace(plugin, "return { items = { { id = 'git' } } }")
+    #expect(await kitsuneWaitUntil(timeout: 3) { changes.value > seen })
+}
+
+@Test func watcherIgnoresNonLuaFilesBelowTheConfigDirectory() async throws {
+    // A README or a checked-in screenshot next to the plugins is not a config, and
+    // rewriting one must not rebuild the menu.
+    let directory = kitsuneTemporaryDirectory("kitsune-watch")
+    defer { kitsuneRemove(directory) }
+    try "return { items = {} }".write(to: directory.appendingPathComponent("config.lua"), atomically: true, encoding: .utf8)
+    _ = try write("return {}", to: "plugins/git.lua", in: directory)
+    let notes = try write("notes", to: "plugins/README.md", in: directory)
+
+    let (watcher, changes) = try startedWatcher(in: directory)
+    defer { _ = watcher }
+    await settle()
+
+    try kitsuneRewriteInPlace(notes, "more notes")
+    // An in-place rewrite leaves the containing directory untouched, so nothing that
+    // is watched has changed.
+    await settle()
+    #expect(changes.value == 0)
+}
+
+@Test func fileOnlyWatcherDoesNotWalkItsDirectory() async throws {
+    // The `~/.config/theme` pointer watcher is aimed at the whole of `~/.config`.
+    // Walking that would watch every dotfile directory the user owns, so recursion is
+    // tied to owning the directory.
+    let directory = kitsuneTemporaryDirectory("kitsune-watch")
+    defer { kitsuneRemove(directory) }
+    try "kanagawa".write(to: directory.appendingPathComponent("theme"), atomically: true, encoding: .utf8)
+    let stranger = try write("return {}", to: "nvim/init.lua", in: directory)
+
+    let (watcher, changes) = try startedWatcher(in: directory, filenames: ["theme"], watchesDirectory: false)
+    defer { _ = watcher }
+    await settle()
+
+    try kitsuneRewriteInPlace(stranger, "return { 'unrelated' }")
+    await settle()
+    #expect(changes.value == 0)
 }

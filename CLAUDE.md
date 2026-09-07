@@ -106,6 +106,16 @@ The `eval` matters just as much: piping the decoded script into a shell puts it 
 multi-line script had `read` swallow its own next line). `eval` runs it in the Terminal window's own shell, which
 leaves stdin on the tty — and because that shell is interactive, it is also what makes zsh print `read`'s `?prompt`.
 
+`terminalLaunch(_:spec:)` decides *where* that script goes, and the two families it returns are not variants of one
+command line. Terminal and iTerm are **scripted** — `do script` / `write text` puts the command into a window already
+running an interactive shell, which is the whole reason the encoding above exists. Every other terminal is **spawned**
+through `open -na <app> --args`, where argv is exact and the command needs no encoding at all; the `-i` in the default
+`-e {shell} -ic {command}` is what keeps prompts printing there. Adding a terminal means adding a line to
+`TerminalSpec.knownArguments`, not a code path, and `args` in the config is the escape hatch for one that isn't listed.
+The spec is held in a process-wide `activeTerminal()` rather than on `LuaRuntime` because `terminalRun` is a bare C
+function pointer with nowhere to hang a reference — `publishSettings` replaces it on every reload, including the
+`Settings()` a missing config publishes, which is what puts Terminal.app back.
+
 `{query}` substitution lives on `ScriptAction.resolved(query:)` and escapes per destination —
 single-quoted for shell, percent-encoded for URLs, backslash-escaped for AppleScript. Lua
 `action` handlers get the query as their first argument. A blank target is a no-op: handing an
@@ -124,6 +134,15 @@ vnode event only fires when an entry is added, removed or renamed — rewriting 
 directory, so a directory-only watch silently misses those saves. File watches are re-armed after
 every event because an editor that saves via rename leaves the old descriptor on a dead inode.
 A second watcher covers `~/.config/theme` so `palette = "auto"` retints when `set-theme` switches.
+
+The watch is **recursive**, because `package.path` makes a config a tree rather than two files: every `.lua` file below
+`~/.config/kitsune` is watched, and so is every directory holding one — an editor saving `plugins/git.lua` by rename
+touches `plugins/`, never the config root, so the root's own watch never sees it. Non-`.lua` files are skipped, hidden
+entries (a version-controlled config's `.git`) are not walked, and the walk is bounded by `maxDepth`/`maxWatches` so a
+repository dropped under the config directory costs a fixed number of descriptors. The tree is re-walked on every event
+rather than enumerated once at `start()`, which is what picks up a `plugins/` directory created after launch.
+Recursion is tied to `watchesDirectory`: the `~/.config/theme` pointer watcher is aimed at the whole of `~/.config`,
+and walking that would watch every dotfile directory the user owns.
 
 ### App index
 
@@ -213,9 +232,25 @@ by two paths that must stay in sync: `control(_:textView:doCommandBy:)` for stan
 `LauncherField.performKeyEquivalent` → `routeKey` for raw key codes (53/125/126/36/76/123). Left-arrow and Escape only
 navigate back when the query is empty.
 
+The window's content view is a plain container holding **two siblings**: the `NSVisualEffectView` and, drawn over it,
+the card. The effect view used to be the card's superview, which made `blur = 0` (implemented as `alphaValue = 0`) hide
+the rows and the input along with the material. `blur = 0` now hides the effect view alone — the card paints
+`cardBackground` over a clear window either way, so the material is the only thing that switch is allowed to reach.
+
 The card is content-sized: `resizeToContent` sums the row heights and caps at `max_height` of the
 screen. It runs *before* `reloadData` in `update(title:rows:)`, because selection repainting walks
 realized rows and the table has none until laid out at its final height.
+
+**Where** it lands is `PanelPlacement` (`Models.swift`) — pure, like `VimKeys` and `RowActions`: the visible frame,
+the pointer and the focused window's frame all arrive as values, so every anchor and every clamp is testable without
+a screen. `theme.position` picks the anchor and `theme.screen` the display; `offset_x`/`offset_y` are applied to the
+anchor and then clamped with it, which is what makes it impossible for a config to place the card off-screen.
+`active-window` and `screen = "active"` resolve through `FocusedWindow.frame()` (`SystemServices.swift`), an
+Accessibility lookup that returns nil rather than guessing and drops those choices back to the pointer.
+
+Both the pointer and that lookup are captured in `captureAnchors()` **once per showing**, not per resize:
+`resizeToContent` runs on every keystroke, an Accessibility call is cross-process, and re-reading the pointer would let
+the panel crawl after the mouse — or hop displays — while the user types into it.
 
 `NSTableView` uses `selectionHighlightStyle = .none`; selection is painted manually by
 `RowView.setSelected`, so `repaintSelection` must tell every realized row (`makeIfNecessary: false`)
@@ -296,7 +331,7 @@ NORMAL while the field is editing.
 ### Menu bar
 
 `MenuBarItem` (`SystemServices.swift`) is the only persistent UI outside the panel: an `NSStatusItem` with Open Config
-Folder / Reload Config / Open at Login / Quit. The app is `LSUIElement`, so without it the only ways to reload or quit are `kitsunectl`
+Folder / Reload Config / Show Last Error / Open at Login / Quit. The app is `LSUIElement`, so without it the only ways to reload or quit are `kitsunectl`
 and `kill`. "Open Config Folder" creates `~/.config/kitsune` first — opening a path that doesn't exist does nothing at
 all.
 
@@ -313,6 +348,34 @@ Switching it off is a one-way door for discoverability, so the first time it hap
 panel's own `showNotice` is no use here — it auto-hides after five seconds and the panel is shut when a config save
 lands.
 
+**Config errors live here, not in a toast.** `LuaRuntime.onLoadOutcome` fires from `publish` — the single point every
+exit from `reload` passes through — so a load's problems are reported exactly once. `AppDelegate` holds them until a
+load succeeds, and surfaces them three ways: the status button goes red, **Show Last Error** opens the full text, and
+`PanelController.persistentNotice` keeps the summary on the panel's banner. All three are needed. The banner alone
+auto-hid after five seconds and the panel is shut when a save lands; the menu bar alone means the only report is behind
+a menu nobody has a reason to open. `MenuBarItem` re-applies the state after building a status item, or switching the
+item off and on again would clear an error that is still outstanding.
+
+The red is painted into a **copy** of the glyph (`MenuBarItem.tinted`), not applied with `contentTintColor`. A status
+item draws a template image as a mask in the menu bar's own text colour and ignores the tint, so the "red" icon was
+black — which is the same thing as no indicator at all. A painted copy must also drop `isTemplate`, or the mask wins
+again.
+
+`ConfigErrorFormatter` is what the user actually reads. Lua's message names the token where the *parser* stopped, which
+for a missing comma is below the line to fix, and repeats an absolute path identical in every error that user will ever
+see. The formatter strips the `Config:` prefix the alert title already says, rewrites paths relative to the config
+directory (`plugins/themes.lua`, not `themes.lua` — that is what the config called it), quotes every line the message
+named straight from the file, and adds the parse-error hint. It takes its file reader as a closure, so the whole thing
+is testable without a disk, on the same argument as `ClipboardHistory.Reading`.
+
+**A plugin the config caught is still reported.** The shipped template loads plugins with `pcall(require, ...)` so one
+broken plugin does not take the menu down — which also swallowed the error whole: the load "succeeded", nothing was
+shown, and the rows just never appeared. `reportingRequire` stands in for `require` in the config state, records the
+failure in the state's own registry (`kitsune.warnings`) and **re-raises it**, so a config that catches it behaves
+exactly as before and one that does not still fails outright. `publish` drops a warning the failure message already
+contains, or an uncaught `require` error would be reported twice. The list lives in the registry rather than a Swift
+global because a state is built per load: one load cannot carry its problems into the next.
+
 `LoginItem` wraps `SMAppService.mainApp` — no helper target, no legacy `SMLoginItemSetEnabled`. It only works from a
 real bundle (the bare `swift build` binary has no Info.plist for launchd), and registration is tied to the bundle's
 signature and location, so re-signing or moving the app can orphan it. `register()` can also succeed while leaving the
@@ -324,6 +387,11 @@ is resolved in `menuNeedsUpdate` rather than cached, because System Settings can
 the app.
 
 ### IPC
+
+`reload` is the one **asynchronous** verb: a config load runs on the Lua queue, so answering `ok` before it had been
+parsed made `kitsunectl reload` useless in a script. `IPCCommands.handle` therefore takes a completion, the socket stays
+open until it fires, and `AppDelegate` parks the reply in `pendingReloads` until `LuaRuntime.onLoadOutcome` reports how
+the load went. Every other verb still answers inline through the pure `response(for:)` switch.
 
 `IPCServer` binds a `0600` Unix socket at
 `~/Library/Containers/com.kitsune.launcher/Data/tmp/kitsune.sock`. One request, one response, connection closed. The handler

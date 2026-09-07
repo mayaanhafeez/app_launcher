@@ -265,6 +265,17 @@ return {
     login = false,
   },
 
+  -- Which terminal a `shell = ...` item opens in. Defaults to Terminal.app.
+  --   terminal = "Ghostty",   -- or "iTerm", "kitty", "WezTerm", "Alacritty", ...
+  -- Terminal and iTerm are driven by AppleScript, which types the command into a
+  -- window already running your interactive shell. Everything else is launched with
+  -- `open -na <app> --args`, and Kitsune knows the flags for the common ones. For
+  -- anything else, spell the argv out -- `{shell}` and `{command}` are substituted,
+  -- and `{command}` arrives as one argument, so it needs no quoting:
+  --   terminal = { app = "Rio", args = { "-e", "{shell}", "-ic", "{command}" } },
+  -- `shell` overrides the shell that runs the command; empty means your $SHELL.
+  terminal = "Terminal",
+
   -- Quiet period after a config-file change before reloading.
   watch = { debounce = 0.08 },
 

@@ -51,26 +51,107 @@ private func luaString(_ state: OpaquePointer, _ index: Int32) -> String? {
     return String(cString: pointer)
 }
 
+/// The command, wrapped so a scripted terminal can be handed one word. The decoded
+/// script is `eval`-ed in the window's own shell rather than piped into a new one.
+/// Piping puts the script on stdin, which is the very thing `read` reads from: a
+/// one-line `read -r '?Formula: ' name; brew install $name` saw EOF and installed
+/// nothing, and a multi-line script had `read` swallow its own next line. `eval`
+/// leaves stdin on the tty, and because that shell is interactive it is also what
+/// makes zsh print `read`'s `?prompt` at all.
+///
+/// The spawned path needs none of this — `open --args` carries argv exactly — so the
+/// encoding lives here rather than in `terminalLaunch`.
+private func evalPayload(_ command: String) -> String {
+    "eval \"$(printf %s \(Data(command.utf8).base64EncodedString()) | base64 -D)\""
+}
+
 /// Internal rather than private so the encoding contract below can be tested
 /// directly: the shipped bug this guards against is invisible from the outside,
 /// since `launchTerminal` only ever hands the string to `osascript`.
 func terminalScript(_ command: String) -> String {
-    let encoded = Data(command.utf8).base64EncodedString()
-    // The decoded script is `eval`-ed in the window's own shell rather than piped
-    // into a new one. Piping puts the script on stdin, which is the very thing
-    // `read` reads from: a one-line `read -r '?Formula: ' name; brew install $name`
-    // saw EOF and installed nothing, and a multi-line script had `read` swallow its
-    // own next line. `eval` leaves stdin on the tty, and because that shell is
-    // interactive it is also what makes zsh print `read`'s `?prompt` at all.
-    let shell = "eval \"$(printf %s \(encoded) | base64 -D)\""
-    return "tell application \"Terminal\"\nactivate\ndo script \"\(ScriptAction.appleScriptQuoted(shell))\"\nend tell"
+    "tell application \"Terminal\"\nactivate\ndo script \"\(ScriptAction.appleScriptQuoted(evalPayload(command)))\"\nend tell"
+}
+
+/// iTerm has no `do script`. `write text` is its equivalent — it types the line into
+/// a session that is already running the user's interactive shell, so the tty and
+/// `read` behave exactly as they do in Terminal.
+func iTermScript(_ command: String) -> String {
+    let quoted = ScriptAction.appleScriptQuoted(evalPayload(command))
+    return """
+    tell application "iTerm"
+    activate
+    set kitsuneWindow to (create window with default profile)
+    tell current session of kitsuneWindow to write text "\(quoted)"
+    end tell
+    """
+}
+
+/// Where a `shell = ...` command is sent, and how. Kept a value — like `ScriptAction`
+/// and `RowAction` — so the whole mapping from a `TerminalSpec` to a process is
+/// testable without spawning one.
+enum TerminalLaunch: Equatable, Sendable {
+    /// AppleScript source for `/usr/bin/osascript`.
+    case appleScript(String)
+    /// argv for `/usr/bin/open`. Exact, so the command needs no quoting at all.
+    case open([String])
+}
+
+/// The login shell for the spawned path. Resolved here rather than baked into
+/// `TerminalSpec()`'s default so the spec stays a plain value.
+private func loginShell() -> String {
+    let shell = ProcessInfo.processInfo.environment["SHELL"] ?? ""
+    return shell.isEmpty ? "/bin/zsh" : shell
+}
+
+func terminalLaunch(_ command: String, spec: TerminalSpec) -> TerminalLaunch {
+    let name = spec.app.lowercased()
+    // An explicit `args` is what forces the spawned path: a user who wrote an argv
+    // template for an app meant it to be used, even for one Kitsune would script.
+    if spec.arguments.isEmpty, TerminalSpec.scripted.contains(name) {
+        return .appleScript(name.hasPrefix("iterm") ? iTermScript(command) : terminalScript(command))
+    }
+    let template = spec.arguments.isEmpty
+        ? (TerminalSpec.knownArguments[name] ?? TerminalSpec.defaultArguments)
+        : spec.arguments
+    let shell = spec.shell.isEmpty ? loginShell() : spec.shell
+    let argv = template.map {
+        $0.replacingOccurrences(of: "{shell}", with: shell)
+            .replacingOccurrences(of: "{command}", with: command)
+    }
+    // `-n`: a new window even when the app is already running, which is what the
+    // scripted path does too.
+    return .open(["-na", spec.app, "--args"] + argv)
+}
+
+/// The terminal every `shell = ...` opens in, held process-wide. `terminalRun` is a
+/// bare C function pointer with nowhere to hang a reference, and `invoke(scriptAction:)`
+/// has to read the same value, so the spec lives here and every settings publish
+/// replaces it.
+private let terminalSpecLock = NSLock()
+nonisolated(unsafe) private var terminalSpecStorage = TerminalSpec()
+
+func setActiveTerminal(_ spec: TerminalSpec) {
+    terminalSpecLock.lock(); defer { terminalSpecLock.unlock() }
+    terminalSpecStorage = spec
+}
+
+func activeTerminal() -> TerminalSpec {
+    terminalSpecLock.lock(); defer { terminalSpecLock.unlock() }
+    return terminalSpecStorage
 }
 
 private func launchTerminal(_ command: String) {
-    NSLog("KitsuneLauncher terminal: %@", command)
+    let spec = activeTerminal()
+    NSLog("KitsuneLauncher terminal (%@): %@", spec.app, command)
     let task = Process()
-    task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-    task.arguments = ["-e", terminalScript(command)]
+    switch terminalLaunch(command, spec: spec) {
+    case .appleScript(let source):
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        task.arguments = ["-e", source]
+    case .open(let argv):
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        task.arguments = argv
+    }
     do { try task.run() } catch { NSLog("KitsuneLauncher terminal failed: %@", error.localizedDescription) }
 }
 
@@ -88,6 +169,51 @@ private let terminalRun: lua_CFunction = { state in
     return 0
 }
 
+/// Module failures the config *caught*, collected in the state that caught them.
+///
+/// The shipped template loads plugins with `pcall(require, ...)` so one broken plugin
+/// does not take the whole menu down — which also means a syntax error in
+/// `plugins/themes.lua` was swallowed whole: the config loaded, nothing was reported
+/// anywhere, and the plugin's rows simply never appeared. The host has to see what the
+/// config chose to ignore, so `require` records every failure before re-raising it,
+/// and the config's own `pcall` goes on working exactly as it did.
+///
+/// The list lives in the state's own registry rather than in a Swift global: a state
+/// is built per load, so it cannot carry one load's problems into the next, and a
+/// second `LuaRuntime` in the same process (a test, a theme) has its own.
+private let warningsKey = "kitsune.warnings"
+/// Where the real `require` is kept while the reporting one stands in for it.
+private let originalRequireKey = "kitsune.require"
+
+private func recordConfigWarning(_ state: OpaquePointer, _ message: String) {
+    lua_getfield(state, CLUA_REGISTRYINDEX, warningsKey)
+    if lua_type(state, -1) != LUA_TTABLE {
+        lua_settop(state, -2)
+        lua_createtable(state, 0, 0)
+        lua_pushvalue(state, -1)
+        lua_setfield(state, CLUA_REGISTRYINDEX, warningsKey)
+    }
+    let count = lua_rawlen(state, -1)
+    lua_pushstring(state, message)
+    lua_rawseti(state, -2, lua_Integer(count + 1))
+    lua_settop(state, -2)
+}
+
+private let reportingRequire: lua_CFunction = { state in
+    guard let state else { return 0 }
+    let argumentCount = lua_gettop(state)
+    lua_getfield(state, CLUA_REGISTRYINDEX, originalRequireKey)
+    for index in 1...max(argumentCount, 1) { lua_pushvalue(state, index) }
+    guard lua_pcallk(state, argumentCount, LUA_MULTRET, 0, 0, nil) == LUA_OK else {
+        let message = luaString(state, -1) ?? "module failed to load"
+        recordConfigWarning(state, message)
+        // Re-raised, so a config that wraps this in `pcall` behaves exactly as before
+        // and one that does not still fails the load outright.
+        return clua_error(state, message)
+    }
+    return lua_gettop(state) - argumentCount
+}
+
 private let appleScriptRun: lua_CFunction = { state in
     guard let state, let source = luaString(state, 1) else { return 0 }
     launchAppleScript(source)
@@ -102,6 +228,11 @@ final class LuaRuntime: @unchecked Sendable {
     private var providers: [String: Int32] = [:]
     var onReload: ((Result<[MenuNode], Error>) -> Void)?
     var onSettings: ((Settings) -> Void)?
+    /// How the load itself went — nil on success, the Lua error otherwise. Separate
+    /// from `onReload` because the node set has one consumer (`MenuController`) and
+    /// the error state has another: the menu bar has to keep showing it long after a
+    /// five-second toast would have gone.
+    var onLoadOutcome: ((String?) -> Void)?
 
     func load(file: URL) {
         queue.async { [weak self] in self?.reload(file: file) }
@@ -174,7 +305,7 @@ final class LuaRuntime: @unchecked Sendable {
             return
         }
         decodeConfig(next)
-        publish(.success(nodes))
+        publish(.success(nodes), warnings: Self.warnings(next))
     }
 
     /// Every state loses `io` and `os.execute`; only the config state gets the
@@ -212,7 +343,12 @@ final class LuaRuntime: @unchecked Sendable {
         lua_pushboolean(state, allowActions ? 1 : 0); lua_setfield(state, -2, "can_execute")
         lua_setglobal(state, "kitsune")
 
+        // Only the config state gets any of this. A provider state is re-created per
+        // keystroke and reports its own failures through the provider error path.
         if allowActions {
+            lua_getglobal(state, "require")
+            lua_setfield(state, CLUA_REGISTRYINDEX, originalRequireKey)
+            lua_pushcclosure(state, reportingRequire, 0); lua_setglobal(state, "require")
             lua_pushcclosure(state, terminalRun, 0); lua_setglobal(state, "terminal")
             lua_pushcclosure(state, terminalRun, 0); lua_setglobal(state, "run")
             lua_pushcclosure(state, appleScriptRun, 0); lua_setglobal(state, "osascript")
@@ -368,6 +504,23 @@ final class LuaRuntime: @unchecked Sendable {
             lua_settop(state, -2)
             if let symbol = field("symbol"), !symbol.isEmpty { settings.menuBar.symbol = symbol }
             if let title = field("title") { settings.menuBar.title = title }
+        }
+        lua_settop(state, -2)
+
+        // Which terminal a `shell = ...` entry opens in. `terminal = "Ghostty"` is the
+        // short form; the table form adds an argv template for one Kitsune has no
+        // entry for. Decoded before `hotkey`, whose guard returns early.
+        lua_getfield(state, -1, "terminal")
+        if let app = luaString(state, -1), !app.isEmpty {
+            settings.terminal.app = app
+        } else if lua_type(state, -1) == LUA_TTABLE {
+            lua_getfield(state, -1, "app")
+            if let app = luaString(state, -1), !app.isEmpty { settings.terminal.app = app }
+            lua_settop(state, -2)
+            if let args = stringList(state, field: "args") { settings.terminal.arguments = args }
+            lua_getfield(state, -1, "shell")
+            if let shell = luaString(state, -1), !shell.isEmpty { settings.terminal.shell = shell }
+            lua_settop(state, -2)
         }
         lua_settop(state, -2)
 
@@ -611,12 +764,57 @@ final class LuaRuntime: @unchecked Sendable {
     }
 
     private func reportError(_ state: OpaquePointer, prefix: String) {
-        publish(.failure(RuntimeError.message("\(prefix): \(luaString(state, -1) ?? "unknown Lua error")")))
+        publish(
+            .failure(RuntimeError.message("\(prefix): \(luaString(state, -1) ?? "unknown Lua error")")),
+            warnings: Self.warnings(state)
+        )
         lua_settop(state, 0)
     }
 
-    private func publish(_ result: Result<[MenuNode], Error>) { DispatchQueue.main.async { [weak self] in self?.onReload?(result) } }
-    private func publishSettings(_ settings: Settings) { DispatchQueue.main.async { [weak self] in self?.onSettings?(settings) } }
+    /// Every exit from `reload` lands here exactly once, which is what makes the
+    /// outcome a reliable "the load finished, and this is how" signal rather than
+    /// something each error path has to remember to send.
+    ///
+    /// A load that *succeeded* can still have a problem to report: a plugin the config
+    /// caught with `pcall` loaded nothing, and saying so is the difference between a
+    /// missing menu and a missing menu you can explain.
+    private func publish(_ result: Result<[MenuNode], Error>, warnings: [String] = []) {
+        DispatchQueue.main.async { [weak self] in
+            self?.onReload?(result)
+            let failure = if case let .failure(error) = result { error.localizedDescription } else { String?.none }
+            // A failure that came *from* a swallowed module error is one problem, not
+            // two: the same Lua message arrives on both paths when the config did not
+            // catch it.
+            let extra = warnings.filter { failure?.contains($0) != true }
+            let outcome = ([failure].compactMap { $0 } + extra).joined(separator: "\n")
+            self?.onLoadOutcome?(outcome.isEmpty ? nil : outcome)
+        }
+    }
+
+    /// What `require` recorded on its way past. Deduplicated: a `require` in a loop can
+    /// fail the same way many times over, and the user has one file to fix either way.
+    private static func warnings(_ state: OpaquePointer) -> [String] {
+        lua_getfield(state, CLUA_REGISTRYINDEX, warningsKey)
+        defer { lua_settop(state, -2) }
+        guard lua_type(state, -1) == LUA_TTABLE else { return [] }
+        let count = Int(lua_rawlen(state, -1))
+        guard count > 0 else { return [] }
+        var messages: [String] = []
+        for index in 1...count {
+            lua_rawgeti(state, -1, lua_Integer(index))
+            if let message = luaString(state, -1), !messages.contains(message) { messages.append(message) }
+            lua_settop(state, -2)
+        }
+        return messages
+    }
+
+    /// The terminal spec is installed here rather than in `AppDelegate`, because the
+    /// thing that reads it is a C function pointer inside this file, and because a
+    /// missing config publishes `Settings()` — which has to put Terminal.app back.
+    private func publishSettings(_ settings: Settings) {
+        setActiveTerminal(settings.terminal)
+        DispatchQueue.main.async { [weak self] in self?.onSettings?(settings) }
+    }
 
     private static let defaultNodes = [
         MenuNode(id: "root", parent: "", kind: .menu, label: "Go", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: nil, order: 0),
@@ -685,7 +883,13 @@ final class ThemeRuntime: @unchecked Sendable {
         size("width", minimum: 220, &theme.width)
         if let value = number("max_height"), value > 0 { theme.maxHeight = min(1, value) }
         size("border_width", &theme.borderWidth)
+        if let value = number("offset_x") { theme.offsetX = value }
         if let value = number("offset_y") { theme.offsetY = value }
+        // Underscores normalise to dashes, as they do for routes, so `active_window`
+        // and `active-window` both name the anchor.
+        func choice(_ key: String) -> String? { string(key)?.replacingOccurrences(of: "_", with: "-") }
+        if let value = choice("position"), let anchor = PanelAnchor(rawValue: value) { theme.position = anchor }
+        if let value = choice("screen"), let screen = PanelScreenChoice(rawValue: value) { theme.screen = screen }
 
         if let value = number("spacing_scale"), value > 0 { theme.spacingScale = value }
         size("panel_padding", &theme.panelPadding)

@@ -37,6 +37,9 @@ final class LauncherTable: NSTableView {
 
 @MainActor
 final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
+    /// The effect view is a *sibling* behind the card, never its superview: hiding a
+    /// superview hides the card with it, which is what `blur = 0` used to do.
+    private let container = NSView()
     private let blur = NSVisualEffectView()
     private let card = NSView()
     private let input = LauncherField()
@@ -46,6 +49,9 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
     private let modeLabel = NSTextField(labelWithString: "NORMAL")
     private let emptyLabel = NSTextField(labelWithString: "No matches")
     private var rows: [DisplayRow] = []
+    /// Where the pointer was, and what was focused, when the panel was last shown.
+    private var anchorPointer = NSEvent.mouseLocation
+    private var anchorWindow: NSRect?
     private var theme = Theme()
     private var title = "Go"
     private let rowIdentifier = NSUserInterfaceItemIdentifier("kitsune-row")
@@ -146,6 +152,7 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
 
     func show(route: String = "root") {
         guard let panel = window else { return }
+        captureAnchors()
         input.stringValue = ""
         mode = .normal
         refreshModeIndicator()
@@ -213,16 +220,44 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
         }
     }
 
+    /// A problem that outlives one showing — an outstanding config error. The banner
+    /// is the only place a launcher with no Dock icon and no main menu can *print* an
+    /// error where the user is already looking, and a five-second toast is no use for
+    /// one: the save that caused it happened in an editor, with the panel closed.
+    var persistentNotice: String? {
+        didSet {
+            guard persistentNotice != oldValue else { return }
+            restoreNotice()
+        }
+    }
+
+    /// Bumped by every notice, so a transient one that has been replaced — or that
+    /// outlived the error it was hiding — does not clear the banner five seconds later.
+    private var noticeGeneration = 0
+
+    /// Five seconds, then the banner goes back to whatever is still outstanding rather
+    /// than to empty: a transient notice borrows the banner, it does not own it.
     func showNotice(_ message: String) {
+        noticeGeneration += 1
+        let mine = noticeGeneration
         notice.stringValue = message
         notice.isHidden = false
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in self?.notice.isHidden = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            guard let self, mine == noticeGeneration else { return }
+            restoreNotice()
+        }
+    }
+
+    private func restoreNotice() {
+        noticeGeneration += 1
+        notice.stringValue = persistentNotice ?? ""
+        notice.isHidden = persistentNotice == nil
     }
 
     func apply(theme: Theme) {
         self.theme = theme
-        blur.material = theme.blur > 0.66 ? .hudWindow : (theme.blur > 0.33 ? .menu : .windowBackground)
-        blur.alphaValue = theme.blur <= 0 ? 0 : 1
+        blur.material = theme.blurMaterial
+        blur.isHidden = !theme.showsBlur
         // The effect view fills the whole window, so without a mask its square material
         // stays visible in the four corners the card rounds away.
         blur.maskImage = Self.roundedMask(radius: theme.radius)
@@ -273,12 +308,26 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
 
     // MARK: - Sizing
 
+    /// Read once per showing rather than per resize. `resizeToContent` runs on every
+    /// keystroke, and an Accessibility lookup is a cross-process call — but the
+    /// pointer matters too: re-reading it would let the panel hop displays, or crawl
+    /// after the mouse, while the user is typing into it.
+    private func captureAnchors() {
+        anchorPointer = NSEvent.mouseLocation
+        let needsWindow = theme.position == .activeWindow || theme.screen == .active
+        anchorWindow = needsWindow ? FocusedWindow.frame() : nil
+    }
+
     /// The card is content-sized like the omarchy menu: it shrinks to the rows it
     /// holds and only scrolls once it hits the screen-fraction cap.
     private func resizeToContent() {
         guard let panel = window else { return }
-        let screen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? NSScreen.main
-        let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let screens = NSScreen.screens
+        let index = PanelPlacement.screenIndex(theme.screen, screens: screens.map(\.frame),
+                                               pointer: anchorPointer, focusedWindow: anchorWindow)
+        let visible = screens.indices.contains(index)
+            ? screens[index].visibleFrame
+            : NSRect(x: 0, y: 0, width: 1440, height: 900)
 
         let edges = theme.topPadding + theme.bottomPadding
         let chrome = edges + theme.headerHeight + theme.space(theme.headerGap)
@@ -286,11 +335,15 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
         let height = min(chrome + contentHeight(), cap).rounded()
         let width = min(theme.width, visible.width - theme.sidePadding * 2).rounded()
 
-        let origin = NSPoint(
-            x: (visible.midX - width / 2).rounded(),
-            y: (visible.midY - height / 2 + theme.offsetY).rounded()
+        let frame = PanelPlacement.frame(
+            size: NSSize(width: width, height: height),
+            visible: visible,
+            anchor: theme.position,
+            offset: CGPoint(x: theme.offsetX, y: theme.offsetY),
+            pointer: anchorPointer,
+            focusedWindow: anchorWindow
         )
-        panel.setFrame(NSRect(origin: origin, size: NSSize(width: width, height: height)), display: true)
+        panel.setFrame(frame, display: true)
         // The shadow is derived from the masked content, so it has to be recomputed
         // whenever the card resizes or it keeps the previous outline.
         panel.invalidateShadow()
@@ -533,10 +586,11 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
     private func buildUI(_ panel: NSPanel) {
         blur.state = .active
         blur.blendingMode = .behindWindow
-        panel.contentView = blur
+        panel.contentView = container
         blur.wantsLayer = true
         card.wantsLayer = true
-        [card].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; blur.addSubview($0) }
+        // Order matters: the effect view is added first so the card draws over it.
+        [blur, card].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; container.addSubview($0) }
         [input, scroll, emptyLabel, notice, modeLabel].forEach { $0.translatesAutoresizingMaskIntoConstraints = false; card.addSubview($0) }
 
         input.isBordered = false
@@ -589,8 +643,10 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
         modeWidth = modeLabel.widthAnchor.constraint(equalToConstant: 48)
 
         NSLayoutConstraint.activate([
-            card.leadingAnchor.constraint(equalTo: blur.leadingAnchor), card.trailingAnchor.constraint(equalTo: blur.trailingAnchor),
-            card.topAnchor.constraint(equalTo: blur.topAnchor), card.bottomAnchor.constraint(equalTo: blur.bottomAnchor),
+            blur.leadingAnchor.constraint(equalTo: container.leadingAnchor), blur.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            blur.topAnchor.constraint(equalTo: container.topAnchor), blur.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            card.leadingAnchor.constraint(equalTo: container.leadingAnchor), card.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            card.topAnchor.constraint(equalTo: container.topAnchor), card.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             inputTop, inputLeading, inputTrailing, inputHeight,
             scrollTop, scrollLeading, scrollTrailing, scrollBottom,
             emptyLabel.centerXAnchor.constraint(equalTo: card.centerXAnchor), emptyLabel.centerYAnchor.constraint(equalTo: scroll.centerYAnchor),

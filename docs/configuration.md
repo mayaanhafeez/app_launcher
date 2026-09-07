@@ -102,7 +102,8 @@ there's always a top level to open.
 
 ## Actions and `{query}`
 
-- **`shell = "..."`** — opens Terminal and runs the command there. The command is
+- **`shell = "..."`** — opens a terminal and runs the command there. Which
+  terminal is [`terminal = ...`](#terminal); Terminal.app is the default. The command is
   Base64-transported into an `eval "$(printf %s ... | base64 -D)"` inside an
   AppleScript `do script`, which is what keeps quotes, newlines, pipes and
   redirects intact, and what lets an interactive `read -r '?Prompt: ' var` work
@@ -433,6 +434,40 @@ Support/Kitsune/clipboard.json`. It is opt-in separately from `enabled`, and
 setting it back to `false` deletes the file rather than leaving what was already
 written on disk.
 
+### `terminal`
+
+```lua
+terminal = "Terminal",   -- default
+terminal = "Ghostty",    -- or "iTerm", "kitty", "WezTerm", "Alacritty", ...
+terminal = { app = "Rio", args = { "-e", "{shell}", "-ic", "{command}" }, shell = "/bin/zsh" },
+```
+
+Which terminal a `shell = "..."` item — and the `terminal(cmd)` / `run(cmd)` Lua
+globals — opens in. There are two ways in, and Kitsune picks by app name:
+
+- **Terminal and iTerm are scripted.** The command is typed into a window that is
+  already running your interactive shell (`do script` for Terminal, `write text`
+  for iTerm), which is what keeps an interactive `read -r '?Prompt: ' var`
+  working. It travels Base64-encoded inside the AppleScript, so quotes, newlines,
+  pipes and redirects survive intact.
+- **Everything else is spawned** with `open -na <app> --args …`, where argv is
+  passed exactly and the command needs no quoting at all. Kitsune knows the flags
+  for the common terminals; the majority take `-e <shell> -ic <command>`, which is
+  also what an app it has never heard of gets.
+
+`args` spells that argv out for a terminal whose flags differ. `{shell}` and
+`{command}` are substituted, each into a single argument. Setting `args` also
+*forces* the spawned path, so it is the way to bypass AppleScript for an app that
+would otherwise be scripted.
+
+`shell` is the shell the spawned path runs the command in; empty — the default —
+resolves to your `$SHELL`, falling back to `/bin/zsh`. The `-i` in the default
+argv is load-bearing for the same reason the scripted path uses `eval`: a
+non-interactive shell prints no prompts, so a `read` would sit there silently.
+
+Unrelated to `commands = { shell = ... }`, which is the shell that runs
+`command = "..."` rows for their output and never opens a window.
+
 ### `login_item`
 
 ```lua
@@ -461,6 +496,42 @@ back on needs no restart.
 bar's light/dark appearance. An unknown name leaves the button's current icon in
 place rather than blanking it — the same rule `hotkey` follows for an unknown key.
 `title` draws text beside the symbol; empty is the icon-only default.
+
+**Config errors show up here.** While a load is failing the status item turns red and
+gains a **Show Last Error** entry; the panel also keeps a one-line summary on its
+banner for as long as the problem lasts, so opening the launcher at all is enough to
+find out that a save did not take. All of it clears on the next load that succeeds,
+and the last good config keeps running in the meantime.
+
+The message is reframed rather than dumped: paths are relative to the config
+directory, every line Lua named is quoted from the file, and a parse error says out
+loud that the line it names is where Lua *gave up* — a missing comma is usually the
+line above.
+
+```
+config.lua:127: '}' expected (to close '{' at line 115) near 'items'
+
+  115 │ return {
+  127 │ items = items,
+
+Lua names the line where it gave up, not the line to fix — a missing comma, `}` or
+`end` is usually just above it.
+```
+
+**A plugin your config catches is reported too.** The sample config loads plugins with
+`pcall(require, "plugins." .. name)` so one broken plugin does not take the whole menu
+down. That used to swallow the error completely: the config loaded, nothing was said,
+and the plugin's rows were simply missing. Kitsune now records what `require` failed
+on before handing the error back to your `pcall`, so a syntax error in
+`plugins/themes.lua` is reported like any other — while the rest of the menu keeps
+working.
+
+`kitsunectl reload` reports the same thing: it waits for the load to finish and exits
+non-zero with the Lua error, so a config edit can be checked in a script.
+
+```sh
+kitsunectl reload || echo "config.lua is broken"
+```
 
 **Removing it costs you something.** Kitsune is `LSUIElement`: no Dock icon, and no
 main menu. The status item is the only UI outside the panel, so with
@@ -562,7 +633,10 @@ palette-seeded value in place rather than overriding it.
 | `width` | `380` | Minimum `220` |
 | `max_height` | `0.6` | Fraction (0–1) of the screen height the panel may grow to before scrolling |
 | `border_width` | `1` | |
-| `offset_y` | `28` | Offset above screen centre |
+| `position` | `"center"` | Anchor: `center`, `top`, `mouse` (hangs below the pointer), `active-window` (centres on the focused window, falling back to `mouse`) |
+| `screen` | `"mouse"` | Display: `mouse`, `main` (the menu-bar display), `active` (the one holding the focused window, falling back to `mouse`) |
+| `offset_x` | `0` | Nudge from the anchor, in screen coordinates |
+| `offset_y` | `28` | Nudge from the anchor; positive is **up**, so the default raises the `center` anchor. Both offsets are clamped to the visible frame, so no value here can push the card off-screen |
 | `spacing_scale` | `1.0` | Multiplies every spacing token below |
 | `panel_padding` | `12` | Inset on every edge, unless overridden per-edge |
 | `padding_top` | (= `panel_padding`) | |

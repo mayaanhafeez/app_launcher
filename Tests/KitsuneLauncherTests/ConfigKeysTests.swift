@@ -218,3 +218,40 @@ import Testing
     defer { kitsuneRemove(directory); _ = runtime }
     #expect(load.settings?.clipboard.pollInterval == 0.1)
 }
+
+@Test func terminalShortFormDecodes() async {
+    let (runtime, load, directory) = await kitsuneLoadConfig("""
+    return { terminal = "Ghostty", items = { { id = "root", label = "Go" } } }
+    """)
+    defer { kitsuneRemove(directory); _ = runtime }
+
+    #expect(load.settings?.terminal.app == "Ghostty")
+    // The short form must leave the rest of the spec alone, so the built-in argv
+    // template for that app is what gets used.
+    #expect(load.settings?.terminal.arguments == [])
+    #expect(load.settings?.terminal.shell == "")
+}
+
+@Test func terminalTableFormDecodes() async {
+    let (runtime, load, directory) = await kitsuneLoadConfig("""
+    return {
+      terminal = { app = "Rio", args = { "-e", "{shell}", "-ic", "{command}" }, shell = "/bin/bash" },
+      items = { { id = "root", label = "Go" } },
+    }
+    """)
+    defer { kitsuneRemove(directory); _ = runtime }
+
+    #expect(load.settings?.terminal.app == "Rio")
+    #expect(load.settings?.terminal.arguments == ["-e", "{shell}", "-ic", "{command}"])
+    #expect(load.settings?.terminal.shell == "/bin/bash")
+}
+
+@Test func absentTerminalKeyKeepsTerminalApp() async {
+    let (runtime, load, directory) = await kitsuneLoadConfig("""
+    return { items = { { id = "root", label = "Go" } } }
+    """)
+    defer { kitsuneRemove(directory); _ = runtime }
+
+    #expect(load.settings?.terminal == TerminalSpec())
+    #expect(load.settings?.terminal.app == "Terminal")
+}
