@@ -21,6 +21,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Whether the menu bar item has already been switched off once, so the notice
     /// explaining what that costs is raised on the transition and not on every save.
     private var appliedMenuBarEnabled: Bool?
+    /// The error from the last config load, held until a load succeeds. A save that
+    /// breaks `config.lua` normally happens with the panel closed, so a five-second
+    /// toast is shown to nobody and the launcher looks like it ignored the edit.
+    private var configError: String?
+    /// The same thing, framed for reading: paths relative to the config directory, the
+    /// named source lines quoted, and — for a parse error — the warning that Lua names
+    /// the line where it gave up rather than the line to fix.
+    private var configReport: [ConfigError] = []
+    /// `kitsunectl reload` answers with the outcome of the load *it* asked for. The
+    /// load is asynchronous, so the reply waits here for the next outcome.
+    private var pendingReloads: [(String?) -> Void] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -67,6 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 panel.showNotice("Hotkey unavailable: " + rejected.map(\.chord).joined(separator: ", "))
             }
         }
+        runtime.onLoadOutcome = { [weak self] error in self?.noteConfigOutcome(error) }
         menu.onRows = { [weak panel] title, rows in panel?.update(title: title, rows: rows) }
         menu.onQuery = { [weak panel] query in panel?.setQuery(query) }
         menu.onNotice = { [weak panel] message in panel?.showNotice(message) }
@@ -81,6 +93,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func reloadAll() {
         runtime.load(file: configDirectory.appendingPathComponent("config.lua"))
         reloadTheme()
+    }
+
+    /// The one place the config error state changes: a failure is held and shown in
+    /// the menu bar until a load succeeds, and every waiting `reload` reply is
+    /// answered with what this load actually did.
+    private func noteConfigOutcome(_ error: String?) {
+        configError = error
+        configReport = error.map { ConfigErrorFormatter.describeAll($0, directory: configDirectory) } ?? []
+        menuBar?.apply(error: error)
+        // Printed where the user actually goes, not only behind a menu item: the banner
+        // stays up for as long as the problem does, so opening the launcher at all is
+        // enough to find out that a save did not take.
+        panel.persistentNotice = ConfigErrorFormatter.banner(for: configReport)
+        pendingReloads.forEach { $0(error) }
+        pendingReloads.removeAll()
+    }
+
+    /// Full text, in a modal alert: the message is a Lua traceback and a status-item
+    /// tooltip cannot hold one. An accessory app has to activate to be seen.
+    ///
+    /// The title does not claim the config failed to load: a plugin caught by the
+    /// config's own `pcall` is reported here too, and in that case the rest of the menu
+    /// loaded fine.
+    private func showLastError() {
+        guard !configReport.isEmpty else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Kitsune found a problem in your config"
+        alert.informativeText = configReport.map(\.full).joined(separator: "\n\n")
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Copy")
+        if alert.runModal() == .alertSecondButtonReturn {
+            NSPasteboard.general.clearContents()
+            // The framed text, not the raw one: it is what the alert showed, and it is
+            // what a bug report wants — the message plus the lines it named.
+            NSPasteboard.general.setString(configReport.map(\.full).joined(separator: "\n\n"), forType: .string)
+        }
     }
 
     private func startWatcher() {
@@ -116,6 +165,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menuBar = MenuBarItem()
         menuBar.onOpenConfig = { [weak self] in self?.openConfigDirectory() }
         menuBar.onReload = { [weak self] in self?.reloadAll() }
+        menuBar.onShowLastError = { [weak self] in self?.showLastError() }
         menuBar.onToggleLoginItem = { [weak self] in
             guard let self else { return }
             let enabled = !LoginItem.isEnabled
@@ -172,23 +222,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startIPC() {
         let container = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Containers/com.kitsune.launcher/Data/tmp")
         let server = IPCServer(socketURL: container.appendingPathComponent("kitsune.sock"))
-        server.handler = { [weak self] request in self?.handle(request) ?? IPCResponse(ok: false, message: "Host unavailable") }
+        server.handler = { [weak self] request, reply in
+            guard let self else { return reply(IPCResponse(ok: false, message: "Host unavailable")) }
+            handle(request, reply)
+        }
         do { try server.start(); ipc = server } catch { panel.showNotice(error.localizedDescription) }
     }
 
     /// The verb table itself lives in `IPCCommands`, which needs no NSApplication;
     /// this only binds each effect to the delegate's objects.
-    private func handle(_ request: IPCRequest) -> IPCResponse {
+    private func handle(_ request: IPCRequest, _ reply: @escaping (IPCResponse) -> Void) {
         IPCCommands(
             toggle: { [weak self] route in self?.toggle(route: route) },
             show: { [weak self] route in self?.show(route: route) },
             hide: { [weak self] in self?.dismiss() },
-            reload: { [weak self] in self?.reloadAll() },
+            reload: { [weak self] answer in
+                guard let self else { return answer("Host unavailable") }
+                pendingReloads.append(answer)
+                reloadAll()
+            },
             paletteName: { [weak self] in self?.themeRuntime.paletteName ?? "" },
             version: { Self.bundleVersion },
             invoke: { [weak self] id in self?.menu.invoke(id: id) ?? false },
             list: { [weak self] route, query in self?.menu.rows(route: route, query: query) }
-        ).handle(request)
+        ).handle(request, completion: reply)
     }
 
     /// `CFBundleShortVersionString (CFBundleVersion)`, or a plain marker when running

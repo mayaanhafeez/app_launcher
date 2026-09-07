@@ -311,7 +311,7 @@ NORMAL while the field is editing.
 ### Menu bar
 
 `MenuBarItem` (`SystemServices.swift`) is the only persistent UI outside the panel: an `NSStatusItem` with Open Config
-Folder / Reload Config / Open at Login / Quit. The app is `LSUIElement`, so without it the only ways to reload or quit are `kitsunectl`
+Folder / Reload Config / Show Last Error / Open at Login / Quit. The app is `LSUIElement`, so without it the only ways to reload or quit are `kitsunectl`
 and `kill`. "Open Config Folder" creates `~/.config/kitsune` first — opening a path that doesn't exist does nothing at
 all.
 
@@ -328,6 +328,34 @@ Switching it off is a one-way door for discoverability, so the first time it hap
 panel's own `showNotice` is no use here — it auto-hides after five seconds and the panel is shut when a config save
 lands.
 
+**Config errors live here, not in a toast.** `LuaRuntime.onLoadOutcome` fires from `publish` — the single point every
+exit from `reload` passes through — so a load's problems are reported exactly once. `AppDelegate` holds them until a
+load succeeds, and surfaces them three ways: the status button goes red, **Show Last Error** opens the full text, and
+`PanelController.persistentNotice` keeps the summary on the panel's banner. All three are needed. The banner alone
+auto-hid after five seconds and the panel is shut when a save lands; the menu bar alone means the only report is behind
+a menu nobody has a reason to open. `MenuBarItem` re-applies the state after building a status item, or switching the
+item off and on again would clear an error that is still outstanding.
+
+The red is painted into a **copy** of the glyph (`MenuBarItem.tinted`), not applied with `contentTintColor`. A status
+item draws a template image as a mask in the menu bar's own text colour and ignores the tint, so the "red" icon was
+black — which is the same thing as no indicator at all. A painted copy must also drop `isTemplate`, or the mask wins
+again.
+
+`ConfigErrorFormatter` is what the user actually reads. Lua's message names the token where the *parser* stopped, which
+for a missing comma is below the line to fix, and repeats an absolute path identical in every error that user will ever
+see. The formatter strips the `Config:` prefix the alert title already says, rewrites paths relative to the config
+directory (`plugins/themes.lua`, not `themes.lua` — that is what the config called it), quotes every line the message
+named straight from the file, and adds the parse-error hint. It takes its file reader as a closure, so the whole thing
+is testable without a disk, on the same argument as `ClipboardHistory.Reading`.
+
+**A plugin the config caught is still reported.** The shipped template loads plugins with `pcall(require, ...)` so one
+broken plugin does not take the menu down — which also swallowed the error whole: the load "succeeded", nothing was
+shown, and the rows just never appeared. `reportingRequire` stands in for `require` in the config state, records the
+failure in the state's own registry (`kitsune.warnings`) and **re-raises it**, so a config that catches it behaves
+exactly as before and one that does not still fails outright. `publish` drops a warning the failure message already
+contains, or an uncaught `require` error would be reported twice. The list lives in the registry rather than a Swift
+global because a state is built per load: one load cannot carry its problems into the next.
+
 `LoginItem` wraps `SMAppService.mainApp` — no helper target, no legacy `SMLoginItemSetEnabled`. It only works from a
 real bundle (the bare `swift build` binary has no Info.plist for launchd), and registration is tied to the bundle's
 signature and location, so re-signing or moving the app can orphan it. `register()` can also succeed while leaving the
@@ -339,6 +367,11 @@ is resolved in `menuNeedsUpdate` rather than cached, because System Settings can
 the app.
 
 ### IPC
+
+`reload` is the one **asynchronous** verb: a config load runs on the Lua queue, so answering `ok` before it had been
+parsed made `kitsunectl reload` useless in a script. `IPCCommands.handle` therefore takes a completion, the socket stays
+open until it fires, and `AppDelegate` parks the reply in `pendingReloads` until `LuaRuntime.onLoadOutcome` reports how
+the load went. Every other verb still answers inline through the pure `response(for:)` switch.
 
 `IPCServer` binds a `0600` Unix socket at
 `~/Library/Containers/com.kitsune.launcher/Data/tmp/kitsune.sock`. One request, one response, connection closed. The handler
