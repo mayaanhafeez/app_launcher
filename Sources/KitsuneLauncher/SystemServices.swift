@@ -3,6 +3,37 @@ import Carbon
 import Darwin
 import ServiceManagement
 
+/// The frontmost window of the frontmost app, in AppKit screen coordinates, for the
+/// `active-window` / `active` placement choices. `nil` whenever the answer would be a
+/// guess — Accessibility not granted, no focused window, no screens — and the anchors
+/// fall back to the pointer rather than inventing a frame.
+///
+/// Accessibility is already required for the global hotkey, so this is normally
+/// available; the guard is for the window between launch and the user granting it.
+enum FocusedWindow {
+    static func frame() -> NSRect? {
+        guard AXIsProcessTrusted(), let primary = NSScreen.screens.first?.frame else { return nil }
+        let system = AXUIElementCreateSystemWide()
+        guard let app: AXUIElement = attribute(system, kAXFocusedApplicationAttribute),
+              let window: AXUIElement = attribute(app, kAXFocusedWindowAttribute),
+              let position: AXValue = attribute(window, kAXPositionAttribute),
+              let size: AXValue = attribute(window, kAXSizeAttribute) else { return nil }
+
+        var origin = CGPoint.zero
+        var extent = CGSize.zero
+        guard AXValueGetValue(position, .cgPoint, &origin), AXValueGetValue(size, .cgSize, &extent) else { return nil }
+        // Accessibility measures from the top-left of the primary display; AppKit
+        // measures from the bottom-left.
+        return NSRect(x: origin.x, y: primary.maxY - origin.y - extent.height, width: extent.width, height: extent.height)
+    }
+
+    private static func attribute<Value>(_ element: AXUIElement, _ name: String) -> Value? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success else { return nil }
+        return value as? Value
+    }
+}
+
 /// Launch at login, via the bundle's own `SMAppService`. There is no helper target
 /// and no legacy `SMLoginItemSetEnabled`: `mainApp` registers the app itself.
 ///
