@@ -91,6 +91,11 @@ Return to activate, Escape to go back a level or dismiss. **Tab** (or ⌘-Return
 selected row opens its [actions](docs/configuration.md#row-actions) — Reveal in Finder,
 Copy Path, Open With… — and Escape returns to the list with your query intact.
 
+Typing a path — anything starting `/` or `~` — turns the list into a directory
+listing instead: Return on a folder browses into it, Return on a file opens it, and
+Tab still gives you Reveal in Finder / Copy Path / Open With. See
+[`files`](docs/configuration.md#files).
+
 Kitsune has no Dock icon or window outside the panel itself; the only persistent UI is
 a **menu bar item** (a dashed-circle glyph) with:
 

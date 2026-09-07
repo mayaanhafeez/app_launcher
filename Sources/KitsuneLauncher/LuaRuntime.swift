@@ -537,6 +537,17 @@ final class LuaRuntime: @unchecked Sendable {
         }
         lua_settop(state, -2)
 
+        // `files = false` switches path completion off; the table form tunes it.
+        lua_getfield(state, -1, "files")
+        if lua_type(state, -1) == LUA_TBOOLEAN {
+            settings.files.enabled = lua_toboolean(state, -1) != 0
+        } else if lua_type(state, -1) == LUA_TTABLE {
+            if let enabled = boolean(state, field: "enabled") { settings.files.enabled = enabled }
+            if let hidden = boolean(state, field: "show_hidden") { settings.files.showHidden = hidden }
+            if let value = number(state, field: "limit") { settings.files.limit = max(1, Int(value)) }
+        }
+        lua_settop(state, -2)
+
         // A list of chords, each of which may open a route or fire a node outright.
         // `hotkey = { ... }` below stays a single-entry alias so a config written
         // before this existed keeps working; an explicit `hotkeys` wins over it.

@@ -225,6 +225,13 @@ return {
   -- turning it back off deletes the file.
   clipboard = { enabled = false, limit = 100, poll_interval = 1, persist = false },
 
+  -- Path completion. A query starting with `/` or `~` at the top level lists that
+  -- directory instead of searching the menu: Return on a folder browses into it,
+  -- Return on a file opens it, Tab gives the usual Reveal / Copy Path / Open With.
+  -- Dotfiles need `show_hidden`, unless the fragment you are typing starts with a
+  -- dot. `files = false` switches it off.
+  files = { enabled = true, show_hidden = false, limit = 40 },
+
   -- Frecency. Rows you activate often, and recently, rank higher in *search*
   -- results; the order you wrote below is never rearranged. `ranking = false`
   -- switches it off. `half_life` is in seconds, `weight` is the ceiling on the

@@ -375,7 +375,21 @@ struct Settings: Sendable {
     var apps = AppScanSpec()
     var menuBar = MenuBarSpec()
     var clipboard = ClipboardSpec()
+    var files = FileSpec()
     var terminal = TerminalSpec()
+}
+
+/// Path completion, configured by `files = { ... }` in config.lua; `files = false`
+/// switches it off. On by default, unlike the clipboard: this reads a directory only
+/// while a path is on screen and remembers nothing.
+struct FileSpec: Sendable, Equatable {
+    var enabled = true
+    /// Dotfiles stay hidden unless asked for — or unless the fragment being typed
+    /// starts with a dot, which is the only reason anyone types one.
+    var showHidden = false
+    /// How many entries a listing may show. A home directory is fine; `/usr/bin` is
+    /// a thousand rows nobody is going to read.
+    var limit = 40
 }
 
 // MARK: - Vim mode
