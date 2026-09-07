@@ -124,3 +124,27 @@ import Testing
     theme.paddingSides = 0
     #expect(theme.sidePadding == 0)
 }
+
+// `blur = 0` is "no effect view", which is a different thing from "an effect view at
+// zero alpha": the effect view used to be the card's superview, so zeroing its alpha
+// took every row and the input field with it (#12). The card keeps painting
+// `cardBackground` regardless — that is what the sample config means by opaque.
+@Test func blurZeroSwitchesTheMaterialOffWithoutTouchingTheCard() {
+    var theme = Theme()
+    theme.blur = 0
+    #expect(!theme.showsBlur)
+    #expect(theme.cardBackground.alphaComponent == theme.bgAlpha)
+
+    theme.blur = 0.01
+    #expect(theme.showsBlur)
+}
+
+@Test func blurPicksTheMaterialByThreshold() {
+    var theme = Theme()
+    theme.blur = 0.82
+    #expect(theme.blurMaterial == .hudWindow)
+    theme.blur = 0.5
+    #expect(theme.blurMaterial == .menu)
+    theme.blur = 0.2
+    #expect(theme.blurMaterial == .windowBackground)
+}

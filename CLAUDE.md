@@ -203,6 +203,11 @@ by two paths that must stay in sync: `control(_:textView:doCommandBy:)` for stan
 `LauncherField.performKeyEquivalent` → `routeKey` for raw key codes (53/125/126/36/76/123). Left-arrow and Escape only
 navigate back when the query is empty.
 
+The window's content view is a plain container holding **two siblings**: the `NSVisualEffectView` and, drawn over it,
+the card. The effect view used to be the card's superview, which made `blur = 0` (implemented as `alphaValue = 0`) hide
+the rows and the input along with the material. `blur = 0` now hides the effect view alone — the card paints
+`cardBackground` over a clear window either way, so the material is the only thing that switch is allowed to reach.
+
 The card is content-sized: `resizeToContent` sums the row heights and caps at `max_height` of the
 screen. It runs *before* `reloadData` in `update(title:rows:)`, because selection repainting walks
 realized rows and the table has none until laid out at its final height.
