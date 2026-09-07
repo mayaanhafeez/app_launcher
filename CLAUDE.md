@@ -294,12 +294,32 @@ panel's own `showNotice` is no use here — it auto-hides after five seconds and
 lands.
 
 **Config errors live here, not in a toast.** `LuaRuntime.onLoadOutcome` fires from `publish` — the single point every
-exit from `reload` passes through — so a failure is reported exactly once per load. `AppDelegate` holds it in
-`configError` until a load succeeds, tints the status button red (`contentTintColor`, so the template image still
-tracks the menu bar's appearance) and unhides **Show Last Error**, which opens the full message in an alert. The panel's
-`showNotice` is not enough on its own: it auto-hides after five seconds, and a config is normally saved with the panel
-closed. `MenuBarItem` re-applies the tint after building a status item, or switching the item off and on again would
-clear an error that is still outstanding.
+exit from `reload` passes through — so a load's problems are reported exactly once. `AppDelegate` holds them until a
+load succeeds, and surfaces them three ways: the status button goes red, **Show Last Error** opens the full text, and
+`PanelController.persistentNotice` keeps the summary on the panel's banner. All three are needed. The banner alone
+auto-hid after five seconds and the panel is shut when a save lands; the menu bar alone means the only report is behind
+a menu nobody has a reason to open. `MenuBarItem` re-applies the state after building a status item, or switching the
+item off and on again would clear an error that is still outstanding.
+
+The red is painted into a **copy** of the glyph (`MenuBarItem.tinted`), not applied with `contentTintColor`. A status
+item draws a template image as a mask in the menu bar's own text colour and ignores the tint, so the "red" icon was
+black — which is the same thing as no indicator at all. A painted copy must also drop `isTemplate`, or the mask wins
+again.
+
+`ConfigErrorFormatter` is what the user actually reads. Lua's message names the token where the *parser* stopped, which
+for a missing comma is below the line to fix, and repeats an absolute path identical in every error that user will ever
+see. The formatter strips the `Config:` prefix the alert title already says, rewrites paths relative to the config
+directory (`plugins/themes.lua`, not `themes.lua` — that is what the config called it), quotes every line the message
+named straight from the file, and adds the parse-error hint. It takes its file reader as a closure, so the whole thing
+is testable without a disk, on the same argument as `ClipboardHistory.Reading`.
+
+**A plugin the config caught is still reported.** The shipped template loads plugins with `pcall(require, ...)` so one
+broken plugin does not take the menu down — which also swallowed the error whole: the load "succeeded", nothing was
+shown, and the rows just never appeared. `reportingRequire` stands in for `require` in the config state, records the
+failure in the state's own registry (`kitsune.warnings`) and **re-raises it**, so a config that catches it behaves
+exactly as before and one that does not still fails outright. `publish` drops a warning the failure message already
+contains, or an uncaught `require` error would be reported twice. The list lives in the registry rather than a Swift
+global because a state is built per load: one load cannot carry its problems into the next.
 
 `LoginItem` wraps `SMAppService.mainApp` — no helper target, no legacy `SMLoginItemSetEnabled`. It only works from a
 real bundle (the bare `swift build` binary has no Info.plist for launchd), and registration is tied to the bundle's

@@ -25,6 +25,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// breaks `config.lua` normally happens with the panel closed, so a five-second
     /// toast is shown to nobody and the launcher looks like it ignored the edit.
     private var configError: String?
+    /// The same thing, framed for reading: paths relative to the config directory, the
+    /// named source lines quoted, and — for a parse error — the warning that Lua names
+    /// the line where it gave up rather than the line to fix.
+    private var configReport: [ConfigError] = []
     /// `kitsunectl reload` answers with the outcome of the load *it* asked for. The
     /// load is asynchronous, so the reply waits here for the next outcome.
     private var pendingReloads: [(String?) -> Void] = []
@@ -96,24 +100,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// answered with what this load actually did.
     private func noteConfigOutcome(_ error: String?) {
         configError = error
+        configReport = error.map { ConfigErrorFormatter.describeAll($0, directory: configDirectory) } ?? []
         menuBar?.apply(error: error)
+        // Printed where the user actually goes, not only behind a menu item: the banner
+        // stays up for as long as the problem does, so opening the launcher at all is
+        // enough to find out that a save did not take.
+        panel.persistentNotice = ConfigErrorFormatter.banner(for: configReport)
         pendingReloads.forEach { $0(error) }
         pendingReloads.removeAll()
     }
 
     /// Full text, in a modal alert: the message is a Lua traceback and a status-item
     /// tooltip cannot hold one. An accessory app has to activate to be seen.
+    ///
+    /// The title does not claim the config failed to load: a plugin caught by the
+    /// config's own `pcall` is reported here too, and in that case the rest of the menu
+    /// loaded fine.
     private func showLastError() {
-        guard let configError else { return }
+        guard !configReport.isEmpty else { return }
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
-        alert.messageText = "Kitsune could not load config.lua"
-        alert.informativeText = configError
+        alert.messageText = "Kitsune found a problem in your config"
+        alert.informativeText = configReport.map(\.full).joined(separator: "\n\n")
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Copy")
         if alert.runModal() == .alertSecondButtonReturn {
             NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(configError, forType: .string)
+            // The framed text, not the raw one: it is what the alert showed, and it is
+            // what a bug report wants — the message plus the lines it named.
+            NSPasteboard.general.setString(configReport.map(\.full).joined(separator: "\n\n"), forType: .string)
         }
     }
 

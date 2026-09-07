@@ -213,10 +213,38 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
         }
     }
 
+    /// A problem that outlives one showing — an outstanding config error. The banner
+    /// is the only place a launcher with no Dock icon and no main menu can *print* an
+    /// error where the user is already looking, and a five-second toast is no use for
+    /// one: the save that caused it happened in an editor, with the panel closed.
+    var persistentNotice: String? {
+        didSet {
+            guard persistentNotice != oldValue else { return }
+            restoreNotice()
+        }
+    }
+
+    /// Bumped by every notice, so a transient one that has been replaced — or that
+    /// outlived the error it was hiding — does not clear the banner five seconds later.
+    private var noticeGeneration = 0
+
+    /// Five seconds, then the banner goes back to whatever is still outstanding rather
+    /// than to empty: a transient notice borrows the banner, it does not own it.
     func showNotice(_ message: String) {
+        noticeGeneration += 1
+        let mine = noticeGeneration
         notice.stringValue = message
         notice.isHidden = false
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in self?.notice.isHidden = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            guard let self, mine == noticeGeneration else { return }
+            restoreNotice()
+        }
+    }
+
+    private func restoreNotice() {
+        noticeGeneration += 1
+        notice.stringValue = persistentNotice ?? ""
+        notice.isHidden = persistentNotice == nil
     }
 
     func apply(theme: Theme) {

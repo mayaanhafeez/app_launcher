@@ -49,6 +49,9 @@ final class MenuBarItem: NSObject, NSMenuDelegate {
     /// here rather than read back off the item, which may not exist yet.
     private let errorItem = NSMenuItem(title: "Show Last Error", action: #selector(showLastError), keyEquivalent: "")
     private var hasError = false
+    /// The untinted glyph. Held because the error tint replaces the button's image
+    /// rather than colouring it, so the original has to survive to be put back.
+    private var baseImage: NSImage?
     var onOpenConfig: (() -> Void)?
     var onReload: (() -> Void)?
     var onToggleLoginItem: (() -> Void)?
@@ -88,7 +91,7 @@ final class MenuBarItem: NSObject, NSMenuDelegate {
             ?? NSImage(systemSymbolName: spec.symbol, accessibilityDescription: "Kitsune") {
             image.isTemplate = true   // so it tracks the menu bar's light/dark appearance
             image.size = NSSize(width: 18, height: 18)
-            item.button?.image = image
+            baseImage = image
         }
         item.button?.title = spec.title
         // After the button exists, and on every re-creation: an outstanding error has
@@ -106,8 +109,26 @@ final class MenuBarItem: NSObject, NSMenuDelegate {
 
     private func refreshErrorState() {
         errorItem.isHidden = !hasError
-        item?.button?.contentTintColor = hasError ? .systemRed : nil
-        item?.button?.toolTip = hasError ? "Kitsune — config.lua failed to load" : "Kitsune"
+        if let baseImage { item?.button?.image = hasError ? Self.tinted(baseImage, .systemRed) : baseImage }
+        item?.button?.toolTip = hasError ? "Kitsune — there is a problem in your config" : "Kitsune"
+    }
+
+    /// A red *copy* of the glyph, rather than `contentTintColor` on the button.
+    ///
+    /// The status item draws a template image as a mask in the menu bar's own text
+    /// colour, and that wins: setting `contentTintColor` left the icon black, which is
+    /// exactly the same thing as no error indicator at all. Painting the colour into a
+    /// non-template image is the only way the menu bar honours it — at the cost of the
+    /// glyph no longer tracking light/dark, which is the point while it is red.
+    static func tinted(_ image: NSImage, _ color: NSColor) -> NSImage {
+        let tinted = NSImage(size: image.size, flipped: false) { rect in
+            image.draw(in: rect)
+            color.set()
+            rect.fill(using: .sourceAtop)
+            return true
+        }
+        tinted.isTemplate = false
+        return tinted
     }
 
     /// The login item can be switched off in System Settings without telling the app,

@@ -429,11 +429,34 @@ bar's light/dark appearance. An unknown name leaves the button's current icon in
 place rather than blanking it — the same rule `hotkey` follows for an unknown key.
 `title` draws text beside the symbol; empty is the icon-only default.
 
-**Config errors show up here.** A save that breaks `config.lua` normally lands with
-the panel closed, so the panel's own five-second notice is shown to nobody. While a
-load is failing, the status item is tinted red and gains a **Show Last Error** entry
-carrying the full Lua message; both clear on the next load that succeeds. The last
-good config keeps running in the meantime.
+**Config errors show up here.** While a load is failing the status item turns red and
+gains a **Show Last Error** entry; the panel also keeps a one-line summary on its
+banner for as long as the problem lasts, so opening the launcher at all is enough to
+find out that a save did not take. All of it clears on the next load that succeeds,
+and the last good config keeps running in the meantime.
+
+The message is reframed rather than dumped: paths are relative to the config
+directory, every line Lua named is quoted from the file, and a parse error says out
+loud that the line it names is where Lua *gave up* — a missing comma is usually the
+line above.
+
+```
+config.lua:127: '}' expected (to close '{' at line 115) near 'items'
+
+  115 │ return {
+  127 │ items = items,
+
+Lua names the line where it gave up, not the line to fix — a missing comma, `}` or
+`end` is usually just above it.
+```
+
+**A plugin your config catches is reported too.** The sample config loads plugins with
+`pcall(require, "plugins." .. name)` so one broken plugin does not take the whole menu
+down. That used to swallow the error completely: the config loaded, nothing was said,
+and the plugin's rows were simply missing. Kitsune now records what `require` failed
+on before handing the error back to your `pcall`, so a syntax error in
+`plugins/themes.lua` is reported like any other — while the rest of the menu keeps
+working.
 
 `kitsunectl reload` reports the same thing: it waits for the load to finish and exits
 non-zero with the Lua error, so a config edit can be checked in a script.
