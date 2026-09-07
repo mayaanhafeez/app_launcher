@@ -42,7 +42,14 @@ return {
   width = 380,
   max_height = 0.6,       -- fraction of the screen the panel may grow to
   border_width = 1,
-  offset_y = 28,          -- above screen centre
+
+  -- Placement. The anchor decides where the card sits; the offsets nudge it from
+  -- there in screen coordinates (positive y is up) and are clamped along with it, so
+  -- nothing here can push the panel off the display.
+  position = "center",    -- center | top | mouse | active-window
+  screen = "mouse",       -- mouse | main (the menu-bar display) | active (focused window)
+  offset_x = 0,
+  offset_y = 28,          -- above screen centre, with the default "center" anchor
 
   -- Spacing. Every value below is multiplied by spacing_scale.
   spacing_scale = 1.0,

@@ -102,7 +102,8 @@ there's always a top level to open.
 
 ## Actions and `{query}`
 
-- **`shell = "..."`** — opens Terminal and runs the command there. The command is
+- **`shell = "..."`** — opens a terminal and runs the command there. Which
+  terminal is [`terminal = ...`](#terminal); Terminal.app is the default. The command is
   Base64-transported into an `eval "$(printf %s ... | base64 -D)"` inside an
   AppleScript `do script`, which is what keeps quotes, newlines, pipes and
   redirects intact, and what lets an interactive `read -r '?Prompt: ' var` work
@@ -400,6 +401,40 @@ Support/Kitsune/clipboard.json`. It is opt-in separately from `enabled`, and
 setting it back to `false` deletes the file rather than leaving what was already
 written on disk.
 
+### `terminal`
+
+```lua
+terminal = "Terminal",   -- default
+terminal = "Ghostty",    -- or "iTerm", "kitty", "WezTerm", "Alacritty", ...
+terminal = { app = "Rio", args = { "-e", "{shell}", "-ic", "{command}" }, shell = "/bin/zsh" },
+```
+
+Which terminal a `shell = "..."` item — and the `terminal(cmd)` / `run(cmd)` Lua
+globals — opens in. There are two ways in, and Kitsune picks by app name:
+
+- **Terminal and iTerm are scripted.** The command is typed into a window that is
+  already running your interactive shell (`do script` for Terminal, `write text`
+  for iTerm), which is what keeps an interactive `read -r '?Prompt: ' var`
+  working. It travels Base64-encoded inside the AppleScript, so quotes, newlines,
+  pipes and redirects survive intact.
+- **Everything else is spawned** with `open -na <app> --args …`, where argv is
+  passed exactly and the command needs no quoting at all. Kitsune knows the flags
+  for the common terminals; the majority take `-e <shell> -ic <command>`, which is
+  also what an app it has never heard of gets.
+
+`args` spells that argv out for a terminal whose flags differ. `{shell}` and
+`{command}` are substituted, each into a single argument. Setting `args` also
+*forces* the spawned path, so it is the way to bypass AppleScript for an app that
+would otherwise be scripted.
+
+`shell` is the shell the spawned path runs the command in; empty — the default —
+resolves to your `$SHELL`, falling back to `/bin/zsh`. The `-i` in the default
+argv is load-bearing for the same reason the scripted path uses `eval`: a
+non-interactive shell prints no prompts, so a `read` would sit there silently.
+
+Unrelated to `commands = { shell = ... }`, which is the shell that runs
+`command = "..."` rows for their output and never opens a window.
+
 ### `login_item`
 
 ```lua
@@ -529,7 +564,10 @@ palette-seeded value in place rather than overriding it.
 | `width` | `380` | Minimum `220` |
 | `max_height` | `0.6` | Fraction (0–1) of the screen height the panel may grow to before scrolling |
 | `border_width` | `1` | |
-| `offset_y` | `28` | Offset above screen centre |
+| `position` | `"center"` | Anchor: `center`, `top`, `mouse` (hangs below the pointer), `active-window` (centres on the focused window, falling back to `mouse`) |
+| `screen` | `"mouse"` | Display: `mouse`, `main` (the menu-bar display), `active` (the one holding the focused window, falling back to `mouse`) |
+| `offset_x` | `0` | Nudge from the anchor, in screen coordinates |
+| `offset_y` | `28` | Nudge from the anchor; positive is **up**, so the default raises the `center` anchor. Both offsets are clamped to the visible frame, so no value here can push the card off-screen |
 | `spacing_scale` | `1.0` | Multiplies every spacing token below |
 | `panel_padding` | `12` | Inset on every edge, unless overridden per-edge |
 | `padding_top` | (= `panel_padding`) | |
