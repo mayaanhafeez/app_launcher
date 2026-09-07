@@ -135,6 +135,15 @@ directory, so a directory-only watch silently misses those saves. File watches a
 every event because an editor that saves via rename leaves the old descriptor on a dead inode.
 A second watcher covers `~/.config/theme` so `palette = "auto"` retints when `set-theme` switches.
 
+The watch is **recursive**, because `package.path` makes a config a tree rather than two files: every `.lua` file below
+`~/.config/kitsune` is watched, and so is every directory holding one — an editor saving `plugins/git.lua` by rename
+touches `plugins/`, never the config root, so the root's own watch never sees it. Non-`.lua` files are skipped, hidden
+entries (a version-controlled config's `.git`) are not walked, and the walk is bounded by `maxDepth`/`maxWatches` so a
+repository dropped under the config directory costs a fixed number of descriptors. The tree is re-walked on every event
+rather than enumerated once at `start()`, which is what picks up a `plugins/` directory created after launch.
+Recursion is tied to `watchesDirectory`: the `~/.config/theme` pointer watcher is aimed at the whole of `~/.config`,
+and walking that would watch every dotfile directory the user owns.
+
 ### App index
 
 `AppIndex` scans `/Applications`, `/System/Applications` and `~/Applications`, plus whatever `apps.paths` adds, and a
