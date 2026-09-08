@@ -139,3 +139,24 @@ private func loadPlacement(_ source: String) -> Theme {
     #expect(theme.position == .center)
     #expect(theme.screen == .mouse)
 }
+
+// MARK: - Hanging from a captured top edge
+
+@Test func hangingKeepsTheTopEdgeWhileTheCardResizes() {
+    // A centred anchor would move the top edge by half of every height change; hanging
+    // from the edge the showing was anchored at turns that back into a pure resize.
+    let anchored = place(.center)
+    let taller = PanelPlacement.frame(size: NSSize(width: card.width, height: 500), visible: left,
+                                      anchor: .center, offset: .zero, pointer: .zero, focusedWindow: nil)
+    let hung = PanelPlacement.hanging(taller, from: anchored.maxY, visible: left)
+    #expect(hung.maxY == anchored.maxY)
+    #expect(hung.height == 500)
+}
+
+@Test func hangingStillClampsToTheVisibleFrame() {
+    // A card that outgrows the space below its top edge slides up rather than off.
+    let low = PanelPlacement.hanging(NSRect(x: 0, y: 0, width: card.width, height: 800),
+                                     from: left.minY + 100, visible: left)
+    #expect(low.origin.y == left.minY)
+    #expect(left.contains(low))
+}
