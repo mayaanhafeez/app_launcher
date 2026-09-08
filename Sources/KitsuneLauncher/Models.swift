@@ -14,7 +14,7 @@ enum RowKind: String, Sendable {
 /// An action described by Lua and executed by the host. Provider states have no
 /// execution globals, so a provider row *describes* what to run and the host runs
 /// it — that is what keeps dynamic rows sandboxed but still actionable.
-enum ScriptAction: Sendable {
+enum ScriptAction: Sendable, Equatable {
     case shell(String)
     case appleScript(String)
     case open(String)
@@ -95,7 +95,7 @@ struct MenuNode: Sendable {
     }
 }
 
-struct DisplayRow: @unchecked Sendable {
+struct DisplayRow: @unchecked Sendable, Equatable {
     let id: String
     let kind: RowKind
     let label: String
@@ -574,6 +574,16 @@ enum PanelPlacement {
         origin.y = (origin.y + offset.y).clamped(to: visible.minY...max(visible.minY, visible.maxY - height))
         return NSRect(origin: NSPoint(x: origin.x.rounded(), y: origin.y.rounded()),
                       size: NSSize(width: width.rounded(), height: height.rounded()))
+    }
+
+    /// `frame` re-anchored to hang from `top`, so a card already on screen grows and
+    /// shrinks downwards instead of being placed afresh: a centred anchor moves the top
+    /// edge by half of every height change, which reads as a jump rather than a resize.
+    /// Still clamped to `visible`, so a card that outgrows the space below `top` slides
+    /// up rather than off the screen.
+    static func hanging(_ frame: NSRect, from top: CGFloat, visible: NSRect) -> NSRect {
+        let y = (top - frame.height).clamped(to: visible.minY...max(visible.minY, visible.maxY - frame.height))
+        return NSRect(origin: NSPoint(x: frame.origin.x, y: y.rounded()), size: frame.size)
     }
 }
 

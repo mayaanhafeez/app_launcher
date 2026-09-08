@@ -52,6 +52,9 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
     /// Where the pointer was, and what was focused, when the panel was last shown.
     private var anchorPointer = NSEvent.mouseLocation
     private var anchorWindow: NSRect?
+    /// The top edge this showing was anchored at, held so later resizes grow the card
+    /// downwards instead of re-anchoring it. Nil until the showing's first resize.
+    private var anchoredTop: CGFloat?
     private var theme = Theme()
     private var title = "Go"
     private let rowIdentifier = NSUserInterfaceItemIdentifier("kitsune-row")
@@ -113,6 +116,11 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = true
+        // AppKit picks an animation for a panel it wasn't told about, and its fade ramps
+        // the card's alpha over ~6 frames. Under a rounded, shadowed card that reads as
+        // the outline settling by a pixel or two on every open, so the panel appears
+        // fully drawn in one frame instead.
+        panel.animationBehavior = .none
         panel.acceptsMouseMovedEvents = true
         super.init(window: panel)
         panel.delegate = self
@@ -186,6 +194,10 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
     }
 
     func update(title: String, rows: [DisplayRow]) {
+        // `MenuController` re-emits for reasons that change nothing here — the app scan
+        // finishing, a provider returning the rows it returned last time. Reloading on
+        // those re-lays the table out and drops the selection back to the first row.
+        guard title != self.title || rows != self.rows else { return }
         self.title = title
         self.rows = rows
         rebuildHints()
@@ -303,6 +315,9 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
         table.rowHeight = theme.rowHeight(hasDetail: false)
         table.reloadData()
         updatePrompt()
+        // A theme can move the panel or change its width, so it re-anchors rather than
+        // holding the top edge the previous theme's geometry put there.
+        anchoredTop = nil
         resizeToContent()
     }
 
@@ -313,6 +328,7 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
     /// pointer matters too: re-reading it would let the panel hop displays, or crawl
     /// after the mouse, while the user is typing into it.
     private func captureAnchors() {
+        anchoredTop = nil
         anchorPointer = NSEvent.mouseLocation
         let needsWindow = theme.position == .activeWindow || theme.screen == .active
         anchorWindow = needsWindow ? FocusedWindow.frame() : nil
@@ -335,7 +351,7 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
         let height = min(chrome + contentHeight(), cap).rounded()
         let width = min(theme.width, visible.width - theme.sidePadding * 2).rounded()
 
-        let frame = PanelPlacement.frame(
+        var frame = PanelPlacement.frame(
             size: NSSize(width: width, height: height),
             visible: visible,
             anchor: theme.position,
@@ -343,6 +359,12 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
             pointer: anchorPointer,
             focusedWindow: anchorWindow
         )
+        // Anchor once per showing, then hang from that top edge: a late row update — a
+        // provider answering, the app scan finishing — must resize the card, not move it.
+        if let top = anchoredTop { frame = PanelPlacement.hanging(frame, from: top, visible: visible) }
+        anchoredTop = frame.maxY
+
+        guard frame != panel.frame else { return }
         panel.setFrame(frame, display: true)
         // The shadow is derived from the masked content, so it has to be recomputed
         // whenever the card resizes or it keeps the previous outline.
