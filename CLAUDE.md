@@ -241,6 +241,15 @@ The card is content-sized: `resizeToContent` sums the row heights and caps at `m
 screen. It runs *before* `reloadData` in `update(title:rows:)`, because selection repainting walks
 realized rows and the table has none until laid out at its final height.
 
+It **anchors once per showing and hangs from that top edge** afterwards (`anchoredTop`,
+`PanelPlacement.hanging`). `PanelPlacement.frame` places the card from scratch, so under the default
+`center` a height change of N moves the top edge by N/2 — and `MenuController.refresh` emits twice,
+so the provider, `command` and file rows land tens to hundreds of ms after the panel is already
+drawn. Re-anchoring there reads as a jump rather than a resize. `captureAnchors` clears it, so a new
+showing still re-anchors, and so does a theme reload, whose geometry may have moved the panel.
+`update` also returns early when neither the title nor the rows changed — the app scan finishing
+re-emits an identical root list — which is why `DisplayRow` is `Equatable`.
+
 **Where** it lands is `PanelPlacement` (`Models.swift`) — pure, like `VimKeys` and `RowActions`: the visible frame,
 the pointer and the focused window's frame all arrive as values, so every anchor and every clamp is testable without
 a screen. `theme.position` picks the anchor and `theme.screen` the display; `offset_x`/`offset_y` are applied to the
