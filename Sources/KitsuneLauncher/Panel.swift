@@ -116,6 +116,11 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = true
+        // AppKit picks an animation for a panel it wasn't told about, and its fade ramps
+        // the card's alpha over ~6 frames. Under a rounded, shadowed card that reads as
+        // the outline settling by a pixel or two on every open, so the panel appears
+        // fully drawn in one frame instead.
+        panel.animationBehavior = .none
         panel.acceptsMouseMovedEvents = true
         super.init(window: panel)
         panel.delegate = self

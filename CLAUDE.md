@@ -261,6 +261,11 @@ Both the pointer and that lookup are captured in `captureAnchors()` **once per s
 `resizeToContent` runs on every keystroke, an Accessibility call is cross-process, and re-reading the pointer would let
 the panel crawl after the mouse — or hop displays — while the user types into it.
 
+The panel is ordered in with `animationBehavior = .none`. Left at `.default`, AppKit picks a fade for
+a panel, and ramping the alpha of a rounded, shadowed card over ~6 frames makes its outline look like
+it settles by a pixel or two on every open — measurable as the card's edges growing 3-5px across the
+frames after it appears, with the window frame provably unchanged.
+
 `NSTableView` uses `selectionHighlightStyle = .none`; selection is painted manually by
 `RowView.setSelected`, so `repaintSelection` must tell every realized row (`makeIfNecessary: false`)
 — scanning `visibleRect` instead misses everything before first layout. Row height is computed in
