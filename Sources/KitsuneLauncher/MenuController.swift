@@ -27,6 +27,12 @@ final class MenuController {
     var providerLimits = ProviderSpec()
     private var location: MenuLocation = .menu("root")
     private var navigation: [Frame] = []
+    /// Which menu the command cache holds answers for. A command reports live state —
+    /// a window list, a container list — and that answer is only good while the menu
+    /// stays open, so arriving at a different menu starts from an empty cache. The
+    /// cache is there to stop backspacing through a query respawning a process, not to
+    /// remember what the machine looked like the last time the user was here.
+    private var commandMenu: String?
 
     /// The id an actions menu reports. It deliberately matches no node, which is what
     /// keeps the back row present (`decorated` only withholds it at `root`) and keeps
@@ -463,13 +469,20 @@ final class MenuController {
         }
 
         if let command = node?.command, !command.isBlank {
+            if commandMenu != menu {
+                commandMenu = menu
+                commands.clearCache()
+            }
             commands.rows(command: command, menuID: menu, query: trimmed) { [weak self] rows in
                 guard let self, generation == self.providerGeneration else { return }
                 self.commandRows = rows
                 emit()
             }
         } else {
-            // Navigating away from a command menu has to kill whatever it started.
+            // Navigating away from a command menu has to kill whatever it started, and
+            // forget where the cache came from: coming back is a fresh look at the
+            // machine even when the query is the one that was typed last time.
+            commandMenu = nil
             commands.cancel()
         }
     }
