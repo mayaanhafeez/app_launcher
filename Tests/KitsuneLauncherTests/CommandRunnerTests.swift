@@ -198,3 +198,83 @@ private func runCommand(_ runner: CommandRunner, _ command: String, query: Strin
     // menu the user already left.
     #expect(!labels.value.contains("FromCommand"))
 }
+
+@MainActor
+@Test func reenteringACommandMenuRespawnsIt() async {
+    let directory = kitsuneTemporaryDirectory("kitsune-cmd-reenter")
+    defer { kitsuneRemove(directory) }
+    let ledger = directory.appendingPathComponent("runs").path
+
+    let controller = MenuController(appIndex: AppIndex(), runtime: LuaRuntime())
+    controller.commands.spec = fastSpec()
+    controller.nodes = [
+        MenuNode(id: "root", parent: "", kind: .menu, label: "Go", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: nil, order: 0),
+        MenuNode(id: "windows", parent: "root", kind: .menu, label: "Windows", detail: "", symbol: "", provider: nil,
+                 command: "printf 'x' >> \(ledger); printf 'Row\\n'", actionReference: nil, scriptAction: nil, order: 1),
+    ]
+    let labels = Locked<[String]>([])
+    controller.onRows = { _, rows in labels.value = rows.map(\.label) }
+
+    for _ in 0..<2 {
+        controller.open(route: "windows")
+        _ = await kitsuneWaitUntil(timeout: 10) { labels.value.contains("Row") }
+        _ = controller.back()
+    }
+
+    // A command reports live state, so the answer cached on the way in is stale by the
+    // time the user comes back: two visits, two spawns.
+    let ledgerContents = (try? String(contentsOfFile: ledger, encoding: .utf8)) ?? ""
+    #expect(ledgerContents == "xx")
+}
+
+@MainActor
+@Test func asyncRowsSurviveTheNextKeystroke() async {
+    let controller = MenuController(appIndex: AppIndex(), runtime: LuaRuntime())
+    controller.commands.spec = fastSpec()
+    controller.nodes = [
+        MenuNode(id: "root", parent: "", kind: .menu, label: "Go", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: nil, order: 0),
+        MenuNode(id: "search", parent: "root", kind: .menu, label: "Search", detail: "", symbol: "", provider: nil,
+                 command: "printf 'FromCommand-{query}\\n'", actionReference: nil, scriptAction: nil, order: 1),
+        MenuNode(id: "search.static", parent: "search", kind: .action, label: "Static", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: .url(""), order: 2),
+    ]
+    let emissions = Locked<[[String]]>([])
+    controller.onRows = { _, rows in emissions.value.append(rows.map(\.label)) }
+
+    controller.open(route: "search")
+    _ = await kitsuneWaitUntil(timeout: 10) { emissions.value.last?.contains("FromCommand-") == true }
+
+    // Every emission from here is a keystroke inside the same menu. The asynchronous
+    // row must never drop out between the synchronous emission and the one carrying
+    // its replacement: that collapse-and-regrow is two `update` passes per key, each a
+    // reload, a resize and a selection reset, and it reads as a flicker.
+    emissions.value = []
+    controller.update(query: "s")
+    controller.update(query: "st")
+    _ = await kitsuneWaitUntil(timeout: 10) {
+        emissions.value.last?.contains("FromCommand-st") == true
+    }
+
+    #expect(!emissions.value.isEmpty)
+    #expect(emissions.value.allSatisfy { labels in labels.contains { $0.hasPrefix("FromCommand-") } })
+}
+
+@MainActor
+@Test func leavingAMenuDropsItsAsyncRows() async {
+    let controller = MenuController(appIndex: AppIndex(), runtime: LuaRuntime())
+    controller.commands.spec = fastSpec()
+    controller.nodes = [
+        MenuNode(id: "root", parent: "", kind: .menu, label: "Go", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: nil, order: 0),
+        MenuNode(id: "search", parent: "root", kind: .menu, label: "Search", detail: "", symbol: "", provider: nil,
+                 command: "printf 'FromCommand\\n'", actionReference: nil, scriptAction: nil, order: 1),
+    ]
+    let labels = Locked<[String]>([])
+    controller.onRows = { _, rows in labels.value = rows.map(\.label) }
+
+    controller.open(route: "search")
+    _ = await kitsuneWaitUntil(timeout: 10) { labels.value.contains("FromCommand") }
+
+    // Retention is scoped to the menu the rows describe. Going back has no replacement
+    // coming, so they go immediately rather than lingering over somewhere else.
+    _ = controller.back()
+    #expect(!labels.value.contains("FromCommand"))
+}

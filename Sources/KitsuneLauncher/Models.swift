@@ -367,6 +367,11 @@ struct Settings: Sendable {
     var watchDebounce: TimeInterval = 0.08
     /// Modal navigation, off unless `vim = true` in config.lua.
     var vimMode = false
+    /// Open as a bare search field, the way Spotlight does: at root with nothing typed
+    /// the list is not drawn at all, and the first keystroke expands the card. Off by
+    /// default, because the menu tree is the point of a launcher that has one — this
+    /// trades discoverability for a quieter opening.
+    var showSearchOnly = false
     /// Launch at login, off unless `login_item = true` in config.lua. Registering
     /// something with launchd is not a thing to do to a user by default.
     var loginItem = false

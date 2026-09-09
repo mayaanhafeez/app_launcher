@@ -76,6 +76,9 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
 
     /// Modal navigation. `mode` is meaningless while this is false — every key goes
     /// straight to the field, exactly as before.
+    /// See `Settings.showSearchOnly`. `MenuController` withholds root's rows; this side
+    /// collapses the card around whatever empty list it is handed.
+    var showSearchOnly = false
     var vimEnabled = false {
         didSet {
             guard vimEnabled != oldValue else { return }
@@ -207,8 +210,12 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
         // reload asks with the table's previous, larger row count against the new,
         // shorter `rows` — an out-of-bounds read whenever the list shrinks.
         table.reloadData()
+        // The list and the "no matches" label are both suppressed while collapsed:
+        // showing either would defeat the point, and the label in particular would keep
+        // the card a row tall for a panel that is meant to be only its field.
+        scroll.isHidden = isCollapsed
         resizeToContent()
-        emptyLabel.isHidden = !rows.isEmpty
+        emptyLabel.isHidden = isCollapsed || !rows.isEmpty
         if rows.isEmpty { table.deselectAll(nil) }
         else {
             // Never land on the back row: Return on a freshly opened submenu has to
@@ -346,7 +353,10 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
             : NSRect(x: 0, y: 0, width: 1440, height: 900)
 
         let edges = theme.topPadding + theme.bottomPadding
-        let chrome = edges + theme.headerHeight + theme.space(theme.headerGap)
+        // The gap below the field belongs to the list, so it goes with it. Left in, a
+        // collapsed card carries a strip of padding under the field that reads as a
+        // clipped first row.
+        let chrome = edges + theme.headerHeight + (isCollapsed ? 0 : theme.space(theme.headerGap))
         let cap = max(theme.headerHeight + edges, visible.height * theme.maxHeight)
         let height = min(chrome + contentHeight(), cap).rounded()
         let width = min(theme.width, visible.width - theme.sidePadding * 2).rounded()
@@ -384,7 +394,13 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
         return image
     }
 
+    /// Collapsed to the field alone. Keyed on the list being empty rather than on the
+    /// query, so it covers both halves of what `show_search_only` means: the opening
+    /// with nothing typed, and a search that has come back with nothing.
+    private var isCollapsed: Bool { showSearchOnly && rows.isEmpty }
+
     private func contentHeight() -> CGFloat {
+        if isCollapsed { return 0 }
         guard !rows.isEmpty else { return theme.rowHeight(hasDetail: false) }
         let spacing = theme.space(theme.rowGap)
         return rows.indices.reduce(CGFloat.zero) { total, index in total + height(ofRow: index) + spacing }
