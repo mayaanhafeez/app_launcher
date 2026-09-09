@@ -86,6 +86,55 @@ private func benchNodes(count: Int) -> [MenuNode] {
     for path in paths { _ = AppIndex.entryForAudit(path: path) }
     let plistMs = Date().timeIntervalSince(start) * 1000
 
-    print(String(format: "  %d apps: Bundle path %.0f ms (cold, includes icons: no) | plist path %.0f ms (includes icon flattening)",
-                 paths.count, bundleMs, plistMs))
+    print(String(format: "  %d apps: Bundle path %.0f ms (cold, includes icons: no) | plist path %.0f ms (metadata only; icons lazy)",
+                  paths.count, bundleMs, plistMs))
+}
+
+/// `results(for:)` now decodes icons for the rows it returns, on the main thread, while
+/// the user types. The bounded cache makes a repeat query cheap; the question is what a
+/// *new* query costs when its rows are not in the cache yet.
+@MainActor
+@Test(.enabled(if: benchmarksEnabled)) func benchmarkAppResultsIconCost() async {
+    let index = AppIndex()
+    index.start()
+    let ready = Locked<Bool>(false)
+    index.onChange = { ready.value = true }
+    _ = await kitsuneWaitUntil(timeout: 30) { ready.value }
+    print("  index: \(index.entries.count) apps")
+
+    // Distinct single letters, so each query returns a largely different row set and
+    // walks past the 64-entry cache the way real typing across sessions would.
+    let queries = "abcdefghijklmnopqrstuvwxyz".map(String.init)
+
+    var coldTotal = 0.0
+    for query in queries {
+        let start = Date()
+        _ = index.results(for: query, limit: 40)
+        coldTotal += Date().timeIntervalSince(start) * 1000
+    }
+    var warmTotal = 0.0
+    for query in queries {
+        let start = Date()
+        _ = index.results(for: query, limit: 40)
+        warmTotal += Date().timeIntervalSince(start) * 1000
+    }
+    print(String(format: "  first pass  %.2f ms/query   second pass %.2f ms/query  (26 queries, limit 40)",
+                 coldTotal / 26, warmTotal / 26))
+
+    // The fairest case for the cache: typing one word, where each keystroke's rows are
+    // a subset of the last and everything is already hot.
+    for _ in 0..<3 { _ = index.results(for: "chr", limit: 40) }
+    var hotTotal = 0.0
+    for _ in 0..<200 {
+        let start = Date()
+        _ = index.results(for: "chr", limit: 40)
+        hotTotal += Date().timeIntervalSince(start) * 1000
+    }
+    print(String(format: "  fully warm, same query: %.3f ms/query", hotTotal / 200))
+
+    // The pathological case: the full apps list, which is what `show apps` draws.
+    let start = Date()
+    _ = index.results(for: "", limit: index.entries.count)
+    print(String(format: "  full list (%d rows, cold-ish): %.1f ms", index.entries.count,
+                 Date().timeIntervalSince(start) * 1000))
 }

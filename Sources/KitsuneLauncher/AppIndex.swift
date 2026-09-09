@@ -7,6 +7,20 @@ final class AppIndex: NSObject {
     private let worker = DispatchQueue(label: "kitsune.app-index", qos: .utility)
     private var scanSpec = AppScanSpec()
     private var iconPoints = thumbnailSize
+    private var iconCache: [String: NSImage] = [:]
+    private var iconOrder: [String] = []
+    /// Sized to hold a whole app list, not a screenful. At 64 the apps menu — 151 rows
+    /// here — could never be hot: every open evicted its own earlier rows and
+    /// re-decoded ~90 icons on the main thread, measured at 36.8ms, a stall on every
+    /// visit rather than only the first. Above the list size the same open costs
+    /// 0.1ms once warm.
+    ///
+    /// The saving that matters survives this: an icon is still only decoded when a row
+    /// carrying it is actually returned, so a launch that never opens the full list
+    /// never pays for it. The ceiling is what the eager index used to cost
+    /// unconditionally (~21KB an icon), now only reached by someone who has really
+    /// looked at that many apps.
+    private let iconCacheCapacity = 192
     var onChange: (() -> Void)?
 
     /// The roots every scan covers, before `apps.paths` is added to them.
@@ -79,10 +93,24 @@ final class AppIndex: NSObject {
     func results(for query: String, limit: Int = 12, bonus: (String) -> Int = { _ in 0 }) -> [DisplayRow] {
         // Folded once for the whole index rather than once per app.
         let needle = FuzzyMatcher.Query(query)
-        return entries.compactMap { entry -> DisplayRow? in
+        let matches = entries.compactMap { entry -> (entry: AppEntry, score: Int)? in
             guard let score = needle.score(in: entry.searchText) else { return nil }
-            return DisplayRow(id: "app:\(entry.path)", kind: .app, label: entry.name, detail: entry.path, symbol: "", image: entry.icon, score: score - bonus(entry.path), section: "apps")
-        }.sorted { $0.score == $1.score ? $0.label < $1.label : $0.score < $1.score }.prefix(limit).map { $0 }
+            return (entry, score - bonus(entry.path))
+        }.sorted {
+            $0.score == $1.score
+                ? $0.entry.name.localizedCaseInsensitiveCompare($1.entry.name) == .orderedAscending
+                : $0.score < $1.score
+        }.prefix(limit)
+
+        // Decode only icons that survive matching and truncation. The bounded cache
+        // keeps the visible working set hot without retaining every installed app's
+        // bitmap for the process lifetime.
+        return matches.map { match in
+            let entry = match.entry
+            return DisplayRow(id: "app:\(entry.path)", kind: .app, label: entry.name,
+                              detail: entry.path, symbol: "", image: icon(for: entry.path),
+                              score: match.score, section: "apps")
+        }
     }
 
     func launch(path: String) {
@@ -94,7 +122,27 @@ final class AppIndex: NSObject {
     /// deleting an app, has to remove those rows on the next reload.
     private func replace(_ incoming: [AppEntry]) {
         entries = incoming
+        let paths = Set(incoming.map(\.path))
+        iconCache = iconCache.filter { paths.contains($0.key) }
+        iconOrder.removeAll { !paths.contains($0) }
         onChange?()
+    }
+
+    private func icon(for path: String) -> NSImage {
+        if let image = iconCache[path] {
+            if let index = iconOrder.firstIndex(of: path) {
+                iconOrder.remove(at: index)
+                iconOrder.append(path)
+            }
+            return image
+        }
+        let image = Self.thumbnail(for: path, size: iconPoints)
+        iconCache[path] = image
+        iconOrder.append(path)
+        while iconOrder.count > iconCacheCapacity {
+            iconCache.removeValue(forKey: iconOrder.removeFirst())
+        }
+        return image
     }
 
     /// Reads the three fields it needs out of `Contents/Info.plist` directly, rather
@@ -144,8 +192,7 @@ final class AppIndex: NSObject {
         // app stays findable by the name the user actually sees on disk.
         let alternate = (localized == name) ? "" : (localized ?? "")
         return AppEntry(id: identifier, name: name, path: path,
-                        searchText: "\(name) \(alternate) \(identifier) \(category)",
-                        icon: thumbnail(for: path))
+                        searchText: "\(name) \(alternate) \(identifier) \(category)")
     }
 
     /// The bundle's Info.plist as a plain dictionary, retained by nobody. Handles the
@@ -209,10 +256,8 @@ final class AppIndex: NSObject {
         return name.hasSuffix(".app") ? String(name.dropLast(4)) : name
     }
 
-    /// Icons are the index's whole memory cost: `NSWorkspace.icon(forFile:)` hands
-    /// back a multi-representation image sized for the Finder, and the index holds
-    /// one per app for the process lifetime. Flattening each to a single bitmap at
-    /// the size the panel actually draws turns megabytes per icon into ~20KB.
+    /// `NSWorkspace.icon(forFile:)` hands back a multi-representation image sized for
+    /// Finder. Flattening to the size the panel draws keeps each cached icon near 20KB.
     nonisolated static let thumbnailSize: CGFloat = 36   // covers `Theme.iconSlot` (34) with room to spare
 
     nonisolated static func thumbnail(for path: String, size: CGFloat = thumbnailSize) -> NSImage {

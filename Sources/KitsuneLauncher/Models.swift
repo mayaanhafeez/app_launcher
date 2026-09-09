@@ -117,7 +117,6 @@ struct AppEntry: @unchecked Sendable {
     let name: String
     let path: String
     let searchText: String
-    let icon: NSImage
 }
 
 /// What a chord does when it fires. A hotkey that only ever opened the root menu is
