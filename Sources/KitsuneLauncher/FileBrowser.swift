@@ -56,10 +56,11 @@ enum FileBrowser {
         // reveals hidden entries whatever the setting says.
         let wantsHidden = spec.showHidden || query.fragment.hasPrefix(".")
 
+        let needle = FuzzyMatcher.Query(query.fragment)
         let matches = names.compactMap { name -> (name: String, score: Int)? in
             guard wantsHidden || !name.hasPrefix(".") else { return nil }
             guard !query.fragment.isEmpty else { return (name, 0) }
-            guard let score = FuzzyMatcher.score(query.fragment, in: name) else { return nil }
+            guard let score = needle.score(in: name) else { return nil }
             return (name, score)
         }
 

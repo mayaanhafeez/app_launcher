@@ -15,7 +15,21 @@ final class MenuController {
     let usage: UsageStore
     let clipboard: ClipboardHistory
     let commands = CommandRunner()
-    var nodes: [MenuNode] = []
+    var nodes: [MenuNode] = [] {
+        didSet {
+            byID.removeAll(keepingCapacity: true)
+            byID.reserveCapacity(nodes.count)
+            // First writer wins, matching `nodes.first(where:)`, which this replaces.
+            for node in nodes where byID[node.id] == nil { byID[node.id] = node }
+        }
+    }
+
+    /// `nodes` keyed by id. Every parent walk — `isDescendant`, `path(for:)` — used to
+    /// find each step with `nodes.first(where:)`, a linear scan of the whole tree, and
+    /// both run once per matching row per keystroke. That made a single character at
+    /// root O(matches x depth x nodes): with 251 nodes it was tens of thousands of
+    /// string compares on the main thread between the keypress and the redraw.
+    private var byID: [String: MenuNode] = [:]
     /// Async rows for the current generation, held so that whichever source answers
     /// second can repaint the list without discarding what the first one returned.
     private var providerRows: [DisplayRow] = []
@@ -163,7 +177,7 @@ final class MenuController {
             onDismiss?()
             return
         }
-        guard let node = nodes.first(where: { $0.id == row.id }) else { return }
+        guard let node = byID[row.id] else { return }
         if node.kind == .menu {
             push(.menu(node.id), restoring: nil)
         } else if let reference = node.actionReference {
@@ -193,7 +207,7 @@ final class MenuController {
         let frame = navigation.popLast()
         // With no frame to pop — a route opened directly, rather than navigated into
         // — fall back to the node's parent, as this has always done.
-        location = frame?.location ?? .menu(nodes.first(where: { $0.id == activeMenu })?.parent ?? "root")
+        location = frame?.location ?? .menu(byID[activeMenu]?.parent ?? "root")
         let restored = frame?.restoreQuery ?? ""
         onQuery?(restored)
         // Refreshed with the restored query, not merely repainted with it:
@@ -332,7 +346,7 @@ final class MenuController {
         // thread and arrive like a provider's, so all this reports is the takeover and
         // where it is pointing.
         if let path = pathQuery(menu: menu, query: query) { return (path.title, []) }
-        let menuNode = nodes.first(where: { $0.id == menu })
+        let menuNode = byID[menu]
         let title = menuNode?.headerTitle ?? "Go"
         var rows: [DisplayRow] = []
         // Frecency has to be applied *inside* the app search, not after it: the index
@@ -348,6 +362,8 @@ final class MenuController {
         } else if menu == "root" && !query.isEmpty {
             rows.append(contentsOf: appIndex.results(for: query, limit: search.appLimit, bonus: appBonus))
         }
+        // One fold for the whole tree rather than one per node.
+        let needle = FuzzyMatcher.Query(query)
         let candidates = nodes.filter { node in
             guard node.id != "root" else { return false }
             // `hidden` drops a node from the listing only. It stays searchable here,
@@ -368,7 +384,7 @@ final class MenuController {
             // to consume what was typed, so the breadcrumb a search hit would get is
             // noise on it.
             if node.keep { return row(node.order, node.detail, "keep") }
-            guard let base = FuzzyMatcher.score(query, in: node.searchText(includingDetail: search.matchDetail)) else { return nil }
+            guard let base = needle.score(in: node.searchText(includingDetail: search.matchDetail)) else { return nil }
             return row(base - usage.bonus(for: node.id), path(for: node),
                        node.parent == menu ? "current" : "drilldown")
         })
@@ -439,7 +455,7 @@ final class MenuController {
         // `search`'s provider, not merely seeing it listed one level up.
         providerGeneration += 1
         let generation = providerGeneration
-        let node = nodes.first(where: { $0.id == menu })
+        let node = byID[menu]
 
         // Asynchronous rows are **kept across a keystroke in the same menu**. Clearing
         // them here and letting them land again a few milliseconds later made the list
@@ -574,7 +590,7 @@ final class MenuController {
         var parent = node.parent
         for _ in 0..<search.depth {
             if parent == ancestor { return true }
-            guard let next = nodes.first(where: { $0.id == parent }) else { return false }
+            guard let next = byID[parent] else { return false }
             parent = next.parent
         }
         return false
@@ -586,7 +602,7 @@ final class MenuController {
         for _ in 0..<search.depth {
             guard let item = current, item.id != "root" else { break }
             labels.insert(item.label, at: 0)
-            current = nodes.first(where: { $0.id == item.parent })
+            current = byID[item.parent]
         }
         return labels.joined(separator: " > ")
     }

@@ -753,22 +753,71 @@ extension NSColor {
 }
 
 enum FuzzyMatcher {
-    static func score(_ query: String, in candidate: String) -> Int? {
-        let needle = Array(query.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current))
-        if needle.isEmpty { return 0 }
-        let haystack = Array(candidate.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current))
-        var position = 0
-        var score = 0
-        var previous = -2
-        for character in needle {
-            guard let found = haystack[position...].firstIndex(of: character) else { return nil }
-            let index = found
-            score += index == previous + 1 ? 1 : 8 + index - position
-            if index == 0 || " /._-".contains(haystack[max(0, index - 1)]) { score -= 5 }
-            previous = index
-            position = index + 1
+    /// A query folded once, then matched against many candidates.
+    ///
+    /// The fold is the expensive part — `folding(options:locale:)` is a locale-aware
+    /// Unicode pass and `Array(String)` allocates and breaks graphemes — and it used to
+    /// happen *inside* `score`, so a keystroke folded the identical needle once per
+    /// candidate: 250 times for the menu, again for every app. Preparing it once and
+    /// reusing it across the loop is the whole point of this type.
+    struct Query {
+        /// Lowercased ASCII bytes, or nil when the query is not pure ASCII. Almost
+        /// every query is, and the byte path avoids the fold and the allocation
+        /// entirely; anything else still goes through the general path below.
+        fileprivate let ascii: [UInt8]?
+        fileprivate let characters: [Character]
+
+        init(_ query: String) {
+            let folded = query.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            characters = Array(folded)
+            let bytes = Array(folded.utf8)
+            ascii = bytes.allSatisfy { $0 < 0x80 } ? bytes : nil
         }
-        return max(0, score + haystack.count / 12)
+
+        var isEmpty: Bool { characters.isEmpty }
+
+        func score(in candidate: String) -> Int? {
+            if isEmpty { return 0 }
+            // Both sides must be ASCII to take the byte path: folding a non-ASCII
+            // candidate can change its length and its content, and only the general
+            // path knows how.
+            if let needle = ascii {
+                let bytes = Array(candidate.utf8)
+                if bytes.allSatisfy({ $0 < 0x80 }) {
+                    return Self.match(needle, bytes.map(Self.lowercased)) { $0 == 32 || $0 == 47 || $0 == 46 || $0 == 95 || $0 == 45 }
+                }
+            }
+            let folded = Array(candidate.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current))
+            return Self.match(characters, folded) { " /._-".contains($0) }
+        }
+
+        private static func lowercased(_ byte: UInt8) -> UInt8 {
+            (byte >= 65 && byte <= 90) ? byte + 32 : byte
+        }
+
+        /// One scoring rule, generic over the element so the byte and character paths
+        /// cannot drift apart. `boundaries` are the characters a match just after
+        /// scores a bonus for starting a word.
+        private static func match<Element: Equatable>(_ needle: [Element], _ haystack: [Element],
+                                                       isBoundary: (Element) -> Bool) -> Int? {
+            var position = 0
+            var score = 0
+            var previous = -2
+            for element in needle {
+                guard let index = haystack[position...].firstIndex(of: element) else { return nil }
+                score += index == previous + 1 ? 1 : 8 + index - position
+                if index == 0 || isBoundary(haystack[max(0, index - 1)]) { score -= 5 }
+                previous = index
+                position = index + 1
+            }
+            return max(0, score + haystack.count / 12)
+        }
+    }
+
+    /// Convenience for a one-off comparison. Anything matching a query against more
+    /// than one candidate should build a `Query` once and reuse it.
+    static func score(_ query: String, in candidate: String) -> Int? {
+        Query(query).score(in: candidate)
     }
 }
 

@@ -77,8 +77,10 @@ final class AppIndex: NSObject {
     /// `limit` happens inside this sort and would otherwise discard the very apps the
     /// discount was meant to promote.
     func results(for query: String, limit: Int = 12, bonus: (String) -> Int = { _ in 0 }) -> [DisplayRow] {
-        entries.compactMap { entry -> DisplayRow? in
-            guard let score = FuzzyMatcher.score(query, in: entry.searchText) else { return nil }
+        // Folded once for the whole index rather than once per app.
+        let needle = FuzzyMatcher.Query(query)
+        return entries.compactMap { entry -> DisplayRow? in
+            guard let score = needle.score(in: entry.searchText) else { return nil }
             return DisplayRow(id: "app:\(entry.path)", kind: .app, label: entry.name, detail: entry.path, symbol: "", image: entry.icon, score: score - bonus(entry.path), section: "apps")
         }.sorted { $0.score == $1.score ? $0.label < $1.label : $0.score < $1.score }.prefix(limit).map { $0 }
     }

@@ -150,9 +150,10 @@ final class ClipboardHistory {
     /// entry back and dismisses through the same path a row action takes — there is no
     /// second dispatch route to keep in step.
     func results(for query: String, limit: Int) -> [DisplayRow] {
+        let needle = FuzzyMatcher.Query(query)
         let matched: [(offset: Int, entry: Entry, score: Int)] = entries.enumerated().compactMap { index, entry in
             guard !query.isEmpty else { return (index, entry, index) }
-            guard let score = FuzzyMatcher.score(query, in: entry.text) else { return nil }
+            guard let score = needle.score(in: entry.text) else { return nil }
             return (index, entry, score)
         }
         // Recency breaks a score tie, which is what keeps the newest of two equally
