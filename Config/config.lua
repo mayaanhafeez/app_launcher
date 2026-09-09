@@ -35,7 +35,7 @@ local items = {
   item("learn", "Learn", { symbol = "book" }),
   item("trigger", "Trigger", { symbol = "bolt" }),
   item("style", "Style", { symbol = "paintpalette" }),
-  item("setup", "Setup", { symbol = "gearshape", aliases = { "settings" } }),
+  item("setup", "Setup", { symbol = "gearshape", aliases = { "config" } }),
   -- Typing inside Install offers to install what you typed (see plugins/brew.lua).
   item("install", "Install", { symbol = "square.and.arrow.down", provider = "brew" }),
   item("remove", "Remove", { symbol = "trash", aliases = { "uninstall" } }),
@@ -150,7 +150,7 @@ local providers = {
   end,
 }
 
-for _, name in ipairs({ "example", "smart", "text", "projects", "themes", "brew" }) do
+for _, name in ipairs({ "example", "smart", "text", "projects", "themes", "brew", "aerospace", "settings" }) do
   local ok, plugin = pcall(require, "plugins." .. name)
   if ok and type(plugin) == "table" then
     for _, entry in ipairs(plugin.items or {}) do items[#items + 1] = entry end
