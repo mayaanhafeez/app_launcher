@@ -62,3 +62,30 @@ private func benchNodes(count: Int) -> [MenuNode] {
     print(String(format: "  NSImage(systemSymbolName:) %.1f us/call  -> %.3f ms for 20 visible rows",
                  each, each * 20 / 1000))
 }
+
+/// Scan cost: the new plist path reads more files per app (Info.plist, then possibly a
+/// .strings or a whole multi-locale .loctable), so it has to be checked against the
+/// Bundle path it replaced rather than assumed cheaper.
+@MainActor
+@Test(.enabled(if: benchmarksEnabled)) func benchmarkScanCost() {
+    let paths = AppIndex.appPaths(in: AppIndex.defaultRoots, depth: 3)
+
+    var start = Date()
+    for path in paths {
+        let url = URL(fileURLWithPath: path)
+        let bundle = Bundle(url: url)
+        _ = (bundle?.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+            ?? (bundle?.object(forInfoDictionaryKey: "CFBundleName") as? String)
+        _ = bundle?.bundleIdentifier
+    }
+    let bundleMs = Date().timeIntervalSince(start) * 1000
+
+    // Bundles are cached process-wide, so a second pass would measure nothing; the new
+    // path caches nothing and is timed as-is.
+    start = Date()
+    for path in paths { _ = AppIndex.entryForAudit(path: path) }
+    let plistMs = Date().timeIntervalSince(start) * 1000
+
+    print(String(format: "  %d apps: Bundle path %.0f ms (cold, includes icons: no) | plist path %.0f ms (includes icon flattening)",
+                 paths.count, bundleMs, plistMs))
+}
