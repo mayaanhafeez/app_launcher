@@ -53,6 +53,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         runtime.onSettings = { [weak self] settings in
             guard let self else { return }
             panel.vimEnabled = settings.vimMode
+            // Both halves of `show_search_only`: the controller withholds root's rows,
+            // the panel collapses the card around the empty list that produces.
+            panel.showSearchOnly = settings.showSearchOnly
+            menu.showSearchOnly = settings.showSearchOnly
             menu.backRow = settings.back
             menu.search = settings.search
             menu.files = settings.files

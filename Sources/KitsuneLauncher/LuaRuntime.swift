@@ -390,6 +390,10 @@ final class LuaRuntime: @unchecked Sendable {
         lua_getfield(state, -1, "vim")
         if lua_type(state, -1) == LUA_TBOOLEAN { settings.vimMode = lua_toboolean(state, -1) != 0 }
         lua_settop(state, -2)
+
+        lua_getfield(state, -1, "show_search_only")
+        if lua_type(state, -1) == LUA_TBOOLEAN { settings.showSearchOnly = lua_toboolean(state, -1) != 0 }
+        lua_settop(state, -2)
         // `back = false` is the short way to switch the row off; the table form
         // configures it. Decoded before `hotkey`, whose guard returns early.
         lua_getfield(state, -1, "back")

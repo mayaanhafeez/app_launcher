@@ -26,6 +26,7 @@ return load {
   },
   plugins = {
     "example", "smart", "text", "projects", "themes", "brew", "aerospace", "settings",
+    "find", "currency", "units",
   },
 
   -- Global chords. Each either toggles the panel (optionally at a `route`) or fires a
@@ -126,6 +127,12 @@ return load {
   -- history to disk; it is opt-in on its own, and turning it back off deletes the file.
   --   clipboard = { enabled = true, limit = 100, poll_interval = 1, persist = false },
   clipboard = false,
+
+  -- Open as a bare search field, the way Spotlight does: at root with nothing typed
+  -- the list is not drawn at all, and the first keystroke expands the card. A submenu
+  -- is unaffected -- arriving somewhere deliberately still shows what is in it. Off by
+  -- default, because the menu tree is the point of a launcher that has one.
+  show_search_only = false,
 
   -- Modal navigation. When on, the panel opens in NORMAL mode:
   --   j / k      move down / up          / or s   clear the query and start typing
