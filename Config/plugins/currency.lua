@@ -39,7 +39,7 @@ if [ ! -s "$cache" ]; then
     mv "$cache.tmp" "$cache" || rm -f "$cache.tmp"
 fi
 [ -s "$cache" ] || {
-  printf '{"label":"No rates for %s","detail":"Unknown currency, or the fetch failed","symbol":"exclamationmark.triangle"}\n' "$from"
+  printf '{"label":"No rates for %s","detail":"Unknown currency, or the fetch failed","symbol":"exclamationmark.triangle","notice":true}\n' "$from"
   exit 0
 }
 
@@ -48,7 +48,7 @@ fi
 # currency reduces to its number once the non-numeric characters are stripped.
 rate=$(awk -v to="$to" 'BEGIN { RS = "," } index($0, "\"" to "\":") { gsub(/[^0-9.]/, "", $0); print; exit }' "$cache")
 [ -z "$rate" ] && {
-  printf '{"label":"No rate for %s","detail":"%s is not in the %s table","symbol":"exclamationmark.triangle"}\n' "$to" "$to" "$from"
+  printf '{"label":"No rate for %s","detail":"%s is not in the %s table","symbol":"exclamationmark.triangle","notice":true}\n' "$to" "$to" "$from"
   exit 0
 }
 
@@ -57,7 +57,7 @@ awk -v a="$amount" -v r="$rate" -v f="$from" -v t="$to" 'BEGIN {
   fmt = (v >= 1 || v == 0) ? "%.2f" : "%.6g"
   value = sprintf(fmt, v)
   printf "{\"label\":\"%s %s\",\"detail\":\"%s %s  ·  1 %s = %.6g %s\",\"symbol\":\"dollarsign.circle\"," \
-         "\"value\":\"fx\",\"applescript\":\"set the clipboard to \\\"%s\\\"\"}\n",
+         "\"value\":\"%s\"}\n",
          value, t, a, f, f, r, t, value
 }'
 ]==]
@@ -71,6 +71,9 @@ return {
       symbol = "arrow.left.arrow.right", title = "Currency  ·  e.g. 50 eur to usd",
       detail = "Type an amount and two currency codes",
       command = SCRIPT,
+      -- The row's value is the converted amount; the node is what copies it. Return on
+      -- one of the notice rows above does nothing, which is what `"notice":true` says.
+      on_select = { applescript = 'set the clipboard to "{value}"' },
     }),
   },
 }

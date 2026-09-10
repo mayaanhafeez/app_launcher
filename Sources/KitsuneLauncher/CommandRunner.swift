@@ -27,12 +27,17 @@ final class CommandRunner {
     /// Runs `command` for `query` and calls back on the main actor. A cache hit answers
     /// synchronously, which is what keeps backspacing through a query from respawning
     /// a process per keystroke.
-    func rows(command: String, menuID: String, query: String, completion: @escaping @MainActor ([DisplayRow]) -> Void) {
+    func rows(command: String, menuID: String, query: String, onSelect: ScriptAction? = nil,
+              completion: @escaping @MainActor ([DisplayRow]) -> Void) {
         // Reuses the shell quoting `ScriptAction` already applies to `shell = ...`, so
         // a query containing quotes, spaces or a semicolon cannot break out of its
         // argument.
         guard case .shell(let script) = ScriptAction.shell(command).resolved(query: query) else { return }
-        let key = "\(menuID)\u{0}\(script)"
+        // The resolved script is normally the whole of what makes an answer specific to
+        // a query. It stops being so when the *action* is what reads `{query}` — a
+        // static command whose `on_select` uses it — and those rows would otherwise be
+        // served from the cache carrying the query that first built them.
+        let key = "\(menuID)\u{0}\(script)" + (onSelect?.wantsQuery == true ? "\u{0}\(query)" : "")
         if let cached = cache[key] {
             completion(cached)
             return
@@ -46,7 +51,8 @@ final class CommandRunner {
         let item = DispatchWorkItem {
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 let output = Self.run(script: script, spec: spec, box: box)
-                let rows = Self.parse(output, menuID: menuID, limit: spec.maxRows)
+                let rows = Self.parse(output, menuID: menuID, limit: spec.maxRows,
+                                      query: query, onSelect: onSelect)
                 DispatchQueue.main.async {
                     guard let self, mine == self.generation else { return }
                     self.store(rows, forKey: key)
@@ -158,24 +164,32 @@ final class CommandRunner {
 
     // MARK: - Parsing
 
+    /// Text, and nothing that runs. A row used to be able to name its own `shell` or
+    /// `applescript`, which made a line of a subprocess's stdout into code — and the
+    /// line is often something the user did not write, like a window title. What it
+    /// does now lives on the node, as `on_select`; the row only fills in `{value}`.
     private struct JSONRow: Decodable {
         var label: String
         var detail: String?
         var symbol: String?
         var value: String?
-        var shell: String?
-        var url: String?
-        var open: String?
-        var applescript: String?
+        /// Opts a row out of the node's `on_select` — an empty state or an error line,
+        /// which is text the user should read rather than something to activate.
+        var notice: Bool?
     }
 
     /// One row per line. A line starting with `{` is JSON, anything else is tab
-    /// separated `label`, `detail`, `shell` — so the cheap case is `printf` or an
-    /// `awk` one-liner, and the full case is still available without a second format.
+    /// separated `label`, `detail` — so the cheap case is `printf` or an `awk`
+    /// one-liner, and the full case is still available without a second format.
+    ///
+    /// `onSelect` is the node's, resolved per row against that row's `value`, which is
+    /// where the shell quoting happens: a window id arrives single-quoted, so a `;` or
+    /// a `|` smuggled into it stops meaning anything.
     ///
     /// Order is preserved and scored by position: `brew search` already ranks its own
     /// output, and re-sorting it would throw that away.
-    nonisolated static func parse(_ text: String, menuID: String, limit: Int) -> [DisplayRow] {
+    nonisolated static func parse(_ text: String, menuID: String, limit: Int,
+                                  query: String = "", onSelect: ScriptAction? = nil) -> [DisplayRow] {
         var rows: [DisplayRow] = []
         var used = Set<String>()
         for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
@@ -187,7 +201,7 @@ final class CommandRunner {
             var detail = ""
             var symbol = ""
             var value: String?
-            var action: ScriptAction?
+            var isNotice = false
 
             if raw.hasPrefix("{") {
                 guard let decoded = try? JSONDecoder().decode(JSONRow.self, from: Data(raw.utf8)) else { continue }
@@ -195,18 +209,18 @@ final class CommandRunner {
                 detail = decoded.detail ?? ""
                 symbol = decoded.symbol ?? ""
                 value = decoded.value
-                action = decoded.shell.map(ScriptAction.shell)
-                    ?? decoded.applescript.map(ScriptAction.appleScript)
-                    ?? decoded.open.map(ScriptAction.open)
-                    ?? decoded.url.map(ScriptAction.url)
+                isNotice = decoded.notice ?? false
             } else {
                 let fields = raw.components(separatedBy: "\t")
                 label = fields[0].trimmingCharacters(in: .whitespaces)
                 detail = fields.count > 1 ? fields[1].trimmingCharacters(in: .whitespaces) : ""
-                if fields.count > 2, !fields[2].isBlank { action = .shell(fields[2]) }
             }
 
             guard !label.isBlank else { continue }
+            // `value` defaults to the label so the tab-separated form stays a one-liner:
+            // `printf 'Safari\tbrowser'` against `on_select = { shell = "open -a {value}" }`
+            // needs no JSON to say the obvious thing twice.
+            let action = isNotice ? nil : onSelect?.resolved(query: query, value: value ?? label)
             var identifier = "\(menuID).cmd.\(slug(value ?? label))"
             while used.contains(identifier) { identifier += "-" }
             used.insert(identifier)

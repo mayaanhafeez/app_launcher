@@ -18,6 +18,13 @@
 --    window; focusing a window must not. `do shell script` runs it silently, which is
 --    what the Automation permission Kitsune already asks for is for.
 --
+-- 4. **The rows carry no action; the node does.** Command output is text — a window
+--    title is written by whatever page a browser has open, and a row that could name
+--    its own command would make that title into one. The node writes the command once
+--    as `on_select` and the row fills in `{value}`, which the host escapes on the way
+--    in. Hence `quoted form of` below: `{value}` lands inside an AppleScript literal
+--    that a shell reads afterwards, and the host escapes it for the layer it can see.
+--
 -- The panel itself is invisible to the window manager — a non-activating accessory
 -- panel never becomes the frontmost window — so `aerospace list-windows --focused`
 -- answers with the user's real window while the launcher is open, and a plain
@@ -30,8 +37,20 @@ local RESOLVE = 'PATH=$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH; '
 
 -- `do shell script "..."` takes an AppleScript string literal, so the script has to be
 -- escaped for AppleScript rather than for the shell.
+local function quote(script)
+  return script:gsub("\\", "\\\\"):gsub('"', '\\"')
+end
+
 local function applescript(script)
-  return 'do shell script "' .. script:gsub("\\", "\\\\"):gsub('"', '\\"') .. '"'
+  return 'do shell script "' .. quote(script) .. '"'
+end
+
+-- The same, with the row's `{value}` appended as the command's last argument. The host
+-- escapes `{value}` for AppleScript, which keeps it inside the literal; `quoted form of`
+-- is what then keeps it inside a single shell argument, so a workspace name containing
+-- a space, a quote or a `;` is a name and never a second command.
+local function applescriptWithValue(prefix)
+  return 'do shell script "' .. quote(prefix) .. '" & quoted form of "{value}"'
 end
 
 -- A static row: run one subcommand against whatever the window manager considers
@@ -64,49 +83,50 @@ function esc(s,   out, i, c) {
   }
   return out
 }
-function row(label, detail, symbol, value, script) {
-  printf "{\"label\":\"%s\",\"detail\":\"%s\",\"symbol\":\"%s\",\"value\":\"%s\"," \
-         "\"applescript\":\"do shell script \\\"%s\\\"\"}\n",
-         esc(label), esc(detail), symbol, esc(value), esc(script)
+function row(label, detail, symbol, value) {
+  printf "{\"label\":\"%s\",\"detail\":\"%s\",\"symbol\":\"%s\",\"value\":\"%s\"}\n",
+         esc(label), esc(detail), symbol, esc(value)
 }
 function notice(label, detail) {
-  printf "{\"label\":\"%s\",\"detail\":\"%s\",\"symbol\":\"exclamationmark.triangle\"}\n",
-         esc(label), esc(detail)
+  printf "{\"label\":\"%s\",\"detail\":\"%s\",\"symbol\":\"exclamationmark.triangle\"," \
+         "\"notice\":true}\n", esc(label), esc(detail)
 }
 ]]
 
--- A row with no action is a notice, which is how "nothing is running" says so instead
--- of drawing an empty menu.
+-- `notice` marks a row as text to read rather than something to activate, which is how
+-- "nothing is running" says so instead of drawing an empty menu.
 local MISSING = 'printf \'{"label":"No window manager found",'
-  .. '"detail":"Install AeroSpace or Hyprspace","symbol":"exclamationmark.triangle"}\\n\''
+  .. '"detail":"Install AeroSpace or Hyprspace","symbol":"exclamationmark.triangle",'
+  .. '"notice":true}\\n\''
 
--- Every window on every workspace, focused by id. The id is what the row acts on, so a
--- window that moved between listing and Return is still the window you picked.
+-- Every window on every workspace, focused by id. The id is the row's `value`, and the
+-- `on_select` below is the only place a command is written, so a window title cannot
+-- become one.
 local WINDOWS = RESOLVE .. ' || { ' .. MISSING .. '; exit 0; }\n'
   .. '"$wm" list-windows --all '
   .. '--format \'%{window-id}\t%{workspace}\t%{app-name}\t%{window-title}\' 2>/dev/null'
-  .. ' | awk -F\'\t\' -v q={query} -v wm="$wm" \''
+  .. ' | awk -F\'\t\' -v q={query} \''
   .. ESCAPE .. [[
 {
   seen = 1
   if (q != "" && index(tolower($3 " " $4), tolower(q)) == 0) next
-  row(($4 == "" ? $3 : $3 "  ·  " $4), "Workspace " $2, "macwindow",
-      "win-" $1, wm " focus --window-id " $1)
+  row(($4 == "" ? $3 : $3 "  ·  " $4), "Workspace " $2, "macwindow", $1)
 }
 END { if (!seen) notice("No windows", "The window manager is not running") }
 ]] .. "'"
 
--- One list, three verbs. `mode` is what the row does with the workspace it names:
--- focus it, send the focused window there, or pull it onto this monitor. The window id
--- is resolved while the rows are built for the same reason the window list bakes one
--- in — by the time Return lands, "focused" may mean something else.
+-- One list, three verbs. `mode` is what the row's `on_select` does with the workspace
+-- it names: focus it, send the focused window there, or pull it onto this monitor. The
+-- listing still resolves the focused window, but only to know whether there is one to
+-- move — the move itself re-reads it, which is the window focused when Return lands
+-- rather than when the list was drawn.
 local function workspaces(mode)
   return RESOLVE .. ' || { ' .. MISSING .. '; exit 0; }\n'
     .. '{ "$wm" list-workspaces --focused --format \'F\t%{workspace}\'\n'
     .. '  "$wm" list-windows --focused --format \'T\t%{window-id}\'\n'
     .. '  "$wm" list-windows --all --format \'N\t%{workspace}\'\n'
     .. '  "$wm" list-workspaces --all --format \'W\t%{workspace}\t%{monitor-name}\'\n'
-    .. '} 2>/dev/null | awk -F\'\t\' -v q={query} -v wm="$wm" -v mode=' .. mode .. ' \''
+    .. '} 2>/dev/null | awk -F\'\t\' -v q={query} -v mode=' .. mode .. ' \''
     .. ESCAPE .. [[
 $1 == "F" { focused = $2; next }
 $1 == "T" { window = $2; next }
@@ -121,14 +141,11 @@ $1 == "W" {
   if (workspace == focused) { detail = detail "  ·  focused"; symbol = "square.grid.2x2.fill" }
   if (mode == "move") {
     if (window == "") next
-    row("Move window to " workspace, detail, symbol, "ws-" workspace,
-        wm " move-node-to-workspace --window-id " window " -- " workspace)
+    row("Move window to " workspace, detail, symbol, workspace)
   } else if (mode == "summon") {
-    row("Summon workspace " workspace, detail, symbol, "ws-" workspace,
-        wm " summon-workspace -- " workspace)
+    row("Summon workspace " workspace, detail, symbol, workspace)
   } else {
-    row("Workspace " workspace, detail, symbol, "ws-" workspace,
-        wm " workspace -- " workspace)
+    row("Workspace " workspace, detail, symbol, workspace)
   }
 }
 END {
@@ -152,22 +169,35 @@ return {
       detail = "Every window, every workspace",
       aliases = { "windows", "alt-tab" },
       command = WINDOWS,
+      -- The command resolved `$wm` to list; the node has to resolve it again to act,
+      -- since the rows no longer carry which of the two binaries answered.
+      on_select = { applescript = applescriptWithValue(
+        RESOLVE .. ' && exec "$wm" focus --window-id ') },
     }),
     item("wm.workspace", "Workspaces", {
       symbol = "square.grid.3x2",
       aliases = { "spaces", "ws" },
       command = workspaces("focus"),
+      on_select = { applescript = applescriptWithValue(
+        RESOLVE .. ' && exec "$wm" workspace -- ') },
     }),
     item("wm.send", "Move Window To", {
       symbol = "arrow.right.square",
       detail = "Send the focused window to a workspace",
       aliases = { "move" },
       command = workspaces("move"),
+      -- `--window-id` is read here rather than baked into the row: the window focused
+      -- when Return lands is the one the user means to move.
+      on_select = { applescript = applescriptWithValue(
+        RESOLVE .. ' && wid=$("$wm" list-windows --focused --format \'%{window-id}\')'
+          .. ' && exec "$wm" move-node-to-workspace --window-id "$wid" -- ') },
     }),
     item("wm.summon", "Summon Workspace", {
       symbol = "arrow.down.left.square",
       detail = "Pull a workspace onto this monitor",
       command = workspaces("summon"),
+      on_select = { applescript = applescriptWithValue(
+        RESOLVE .. ' && exec "$wm" summon-workspace -- ') },
     }),
 
     -- Layout, on whatever is focused. `layout` takes a list and toggles between the

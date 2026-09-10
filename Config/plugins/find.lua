@@ -15,10 +15,11 @@
 -- 2. **The command filters on `{query}` itself.** Command rows are appended *after*
 --    the fuzzy filter, exactly like provider rows, so nothing narrows them for you.
 --
--- 3. **Rows are emitted as JSON, one per line, carrying `open`.** The tab-separated
---    form's third field is `shell`, which would open a terminal window just to hand a
---    path to `open`. A JSON row's `open` goes straight to NSWorkspace, and Tab on the
---    row still gives Reveal in Finder / Copy Path / Open With.
+-- 3. **Rows are emitted as JSON so each can carry a `value`.** The path is the value,
+--    and `on_select` is what turns it into an action -- `open` goes straight to
+--    NSWorkspace rather than opening a terminal window just to hand it a path, and Tab
+--    on the row still gives Reveal in Finder / Copy Path / Open With, since the row
+--    ends up carrying the same resolved `open` action it used to print for itself.
 --
 -- An empty query -- or one that looks like a flag, since mdfind has no `--` separator
 -- to end its options -- exits before running anything: mdfind prints its usage to stdout,
@@ -46,12 +47,16 @@ function esc(s,   out, i, c) {
   dir = substr(path, 1, length(path) - length(name) - 1)
   if (dir == "") dir = "/"
   if (index(dir, home) == 1) dir = "~" substr(dir, length(home) + 1)
-  printf "{\"label\":\"%s\",\"detail\":\"%s\",\"symbol\":\"doc\",\"value\":\"%s\",\"open\":\"%s\"}\n",
-         esc(name), esc(dir), esc(path), esc(path)
+  printf "{\"label\":\"%s\",\"detail\":\"%s\",\"symbol\":\"doc\",\"value\":\"%s\"}\n",
+         esc(name), esc(dir), esc(path)
 }'
 ]==]
 
 -- `head` bounds the output before awk ever sees it; `commands.max_rows` is the backstop.
+-- The path is a value, never a command: `open` hands it to NSWorkspace, and a filename
+-- containing a quote or a semicolon is a filename all the way down.
+local OPEN = { open = "{value}" }
+
 local function search(flags)
   return 'q={query}; case "$q" in ""|-*) exit 0 ;; esac; mdfind ' .. flags ..
          ' "$q" 2>/dev/null | head -50 | ' .. ROWS
@@ -65,15 +70,16 @@ return {
           { "mdfind", "spotlight", "file-search" }),
     item("find.name", "By Name", {
       symbol = "textformat", detail = "Filenames, anywhere Spotlight indexes",
-      command = search("-name"),
+      command = search("-name"), on_select = OPEN,
     }),
     item("find.content", "By Content", {
       symbol = "text.magnifyingglass", detail = "Full text inside files",
-      command = search(""),
+      command = search(""), on_select = OPEN,
     }),
     item("find.home", "By Content in Home", {
       symbol = "house", detail = "Full text under ~",
       command = 'q={query}; case "$q" in ""|-*) exit 0 ;; esac; mdfind -onlyin "$HOME" "$q" 2>/dev/null | head -50 | ' .. ROWS,
+      on_select = OPEN,
     }),
   },
 }
