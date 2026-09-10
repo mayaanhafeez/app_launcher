@@ -86,6 +86,8 @@ return {
 | `icon` | Path to an image file (`~` allowed). **Wins over `symbol`** when both are set — the symbol glyph is simply not drawn. |
 | `aliases` | Extra route strings for `kitsunectl show <alias>` / `kitsunectl invoke <alias>`. Also folded into fuzzy search alongside the label, detail, and the id's last dotted segment (`install.editor.zed` is found by typing `zed`). |
 | `provider` | Name of a function in the top-level `providers` table that supplies this item's *children* at query time. See [Providers](#providers). |
+| `command` | A shell command whose stdout becomes this item's rows while its submenu is open. See [Command rows](#command-rows). |
+| `on_select` | What activating one of those command rows does: `{ shell = ... }`, `{ applescript = ... }`, `{ open = ... }` or `{ url = ... }`, with `{value}` standing in for the row's own value. |
 | `shell` / `applescript` / `open` / `url` | What the row does. See below. |
 | `action` | A Lua function `function(query) ... end`, run in the full config state (with `terminal`/`run`/`osascript` available). See below. |
 
@@ -221,6 +223,60 @@ A provider row has **no `action` function field** — providers describe actions
 as data, they don't hand back closures. A row with none of `shell`,
 `applescript`, `open`, or `url` set is purely informational (not activatable).
 
+## Command rows
+
+`provider` supplies rows from Lua; `command` supplies them from a subprocess. A
+provider is re-loaded into a throwaway sandbox on every keystroke with no
+execution globals, so it is a pure function of the query — anything that has to
+*look at the machine* (`brew search`, `mdfind`, `aerospace list-windows`) has to
+be a command instead.
+
+```lua
+item("wm.switch", "Switch Window", {
+  command = "aerospace list-windows --all --format '%{window-id}\t%{app-name}'"
+            .. " | awk -F'\t' '{ printf \"%s\\t%s\\n\", $2, $1 }'",
+  on_select = { applescript = 'do shell script "aerospace focus --window-id " & quoted form of "{value}"' },
+})
+```
+
+Like a provider, a command belongs to the submenu that **declares** it and runs
+while that submenu is open, and its rows are appended *after* the fuzzy filter —
+so nothing narrows them for you and the command has to filter on `{query}`
+itself.
+
+### Output format
+
+One row per line. A line starting with `{` is JSON; anything else is tab
+separated `label`, `detail`.
+
+| JSON key | Meaning |
+|---|---|
+| `label` | Required. A line without a non-empty label is skipped. |
+| `detail` | Subtitle. |
+| `symbol` | SF Symbol name. |
+| `value` | What `{value}` in `on_select` is replaced with, and what names the row's id. Defaults to the label. |
+| `notice` | `true` marks the row informational: it ignores `on_select` and cannot be activated. Use it for "nothing found" and error lines. |
+
+### Output is text, never behaviour
+
+A command's output supplies those five keys and nothing else. It cannot name a
+command of its own, because the lines are frequently not written by you — a
+window title is set by whatever page a browser has open — and a row that could
+carry its own action would make that title into code.
+
+The authority to run something stays on the node, in `on_select`, which is
+written once in your config. `{value}` is the only hole the output fills, and it
+is escaped per destination exactly as `{query}` is: single-quoted for `shell`,
+backslash-escaped for `applescript`, percent-encoded for `url`. A window id
+arrives quoted, so a `;` or a `|` inside it stops meaning anything.
+
+The one case that needs care is an `applescript` that itself runs a shell
+command. `do shell script "..."` is a *shell* string inside an *AppleScript*
+string, and Kitsune only escapes the layer it can see — the AppleScript one. Use
+AppleScript's own `quoted form of` for the inner layer, as the example above
+does; `Config/plugins/aerospace.lua` does the same thing for all four of its
+menus.
+
 ## Row actions
 
 Tab — or ⌘↩ — on the selected row opens what else can be done with it. Escape
@@ -233,6 +289,7 @@ returns to the list **with your query intact**.
 | `url = "..."` | Copy URL, Copy Label |
 | `open = "..."` | Reveal in Finder, Copy Path, Open With…, Copy Label |
 | `applescript = "..."` | Copy AppleScript, Copy Label |
+| A command row | Whatever its item's `on_select` is, with `{value}` already filled in |
 | Anything else | Copy Label |
 
 Copy as Shell Command copies the command that would actually run, with `{query}`

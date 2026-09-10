@@ -21,6 +21,10 @@ enum ScriptAction: Sendable, Equatable {
     case url(String)
 
     static let queryToken = "{query}"
+    /// The row's own `value`, on a command row. Same escaping as `{query}`, and the
+    /// reason command output no longer needs to carry an action of its own: the node
+    /// writes the command, the output only fills this hole in it.
+    static let valueToken = "{value}"
 
     private var template: String {
         switch self {
@@ -34,21 +38,69 @@ enum ScriptAction: Sendable, Equatable {
     /// Shell values arrive already single-quoted, so `brew install {query}` is safe
     /// to write bare.
     func resolved(query: String) -> ScriptAction {
-        guard wantsQuery else { return self }
+        resolved(query: query, value: nil)
+    }
+
+    /// Both tokens in **one pass**, so a substituted value containing the literal
+    /// text `{query}` is not itself rewritten — the whole point is that nothing
+    /// arriving from output gets a second reading.
+    func resolved(query: String, value: String?) -> ScriptAction {
+        let template = self.template
+        guard template.contains(Self.queryToken) || (value != nil && template.contains(Self.valueToken)) else { return self }
+        let substituted = Self.substitute(template, query: query, value: value, escape: escaper)
         switch self {
-        case .shell(let value): return .shell(value.replacingOccurrences(of: Self.queryToken, with: Self.shellQuoted(query)))
-        case .appleScript(let value): return .appleScript(value.replacingOccurrences(of: Self.queryToken, with: Self.appleScriptQuoted(query)))
-        case .open(let value): return .open(value.replacingOccurrences(of: Self.queryToken, with: query))
-        case .url(let value): return .url(value.replacingOccurrences(of: Self.queryToken, with: Self.urlEncoded(query)))
+        case .shell: return .shell(substituted)
+        case .appleScript: return .appleScript(substituted)
+        case .open: return .open(substituted)
+        case .url: return .url(substituted)
         }
+    }
+
+    private var escaper: (String) -> String {
+        switch self {
+        case .shell: return Self.shellQuoted
+        case .appleScript: return Self.appleScriptQuoted
+        case .open: return { $0 }
+        case .url: return Self.urlEncoded
+        }
+    }
+
+    private static func substitute(_ template: String, query: String, value: String?, escape: (String) -> String) -> String {
+        var out = ""
+        var rest = Substring(template)
+        while true {
+            // Whichever token comes first in what is left. Asking for them separately
+            // is what makes this one pass: the replacement is appended to `out` and
+            // never looked at again, so a value containing `{query}` stays literal.
+            let queryHit = rest.firstRange(of: queryToken)
+            let valueHit = value.flatMap { _ in rest.firstRange(of: valueToken) }
+            let next: (range: Range<Substring.Index>, text: String)?
+            switch (queryHit, valueHit) {
+            case (let q?, let v?): next = q.lowerBound <= v.lowerBound ? (q, query) : (v, value ?? "")
+            case (let q?, nil): next = (q, query)
+            case (nil, let v?): next = (v, value ?? "")
+            case (nil, nil): next = nil
+            }
+            guard let hit = next else { break }
+            out += rest[rest.startIndex..<hit.range.lowerBound]
+            out += escape(hit.text)
+            rest = rest[hit.range.upperBound...]
+        }
+        return out + rest
     }
 
     static func shellQuoted(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
+    /// Newlines are escaped alongside quotes and backslashes: a raw newline inside an
+    /// AppleScript string literal is a syntax error, not an injection, but it is still
+    /// a value from outside deciding whether the script compiles.
     static func appleScriptQuoted(_ value: String) -> String {
-        value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+        value.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
     }
 
     static func urlEncoded(_ value: String) -> String {
@@ -73,6 +125,11 @@ struct MenuNode: Sendable {
     /// A shell command whose stdout becomes rows while this submenu is open. Like
     /// `provider`, it belongs to the menu that declares it, and may contain `{query}`.
     var command: String = ""
+    /// What activating one of those command rows does. The output supplies text and
+    /// nothing else, so the authority to run something stays here, on the node the
+    /// config wrote — `{value}` is the only thing a row gets to fill in, escaped for
+    /// its destination exactly as `{query}` is.
+    var onSelect: ScriptAction? = nil
     let actionReference: Int32?
     let scriptAction: ScriptAction?
     let order: Int

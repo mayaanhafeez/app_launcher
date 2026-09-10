@@ -535,7 +535,7 @@ final class MenuController {
                 commandMenu = menu
                 commands.clearCache()
             }
-            commands.rows(command: command, menuID: menu, query: trimmed) { [weak self] rows in
+            commands.rows(command: command, menuID: menu, query: trimmed, onSelect: node?.onSelect) { [weak self] rows in
                 guard let self, generation == self.providerGeneration else { return }
                 self.commandRows = rows
                 emit()

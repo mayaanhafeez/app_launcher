@@ -17,6 +17,17 @@ return {
       symbol = "text.magnifyingglass",
       shell = "grep -rn {query} ~ | less",
     }),
+    -- A `command` fills a submenu from a subprocess while it is open. The output is
+    -- text -- tab-separated `label`<TAB>`detail`, or JSON for the full set of fields --
+    -- and `on_select` is what a row *does*, with `{value}` standing in for the row's
+    -- own value (its label, unless the JSON form gave it one). The output never names
+    -- a command of its own: `{value}` is quoted on the way in, so a filename with a
+    -- space or a semicolon in it stays a filename.
+    item("dev.branches", "Git Branches", {
+      symbol = "arrow.triangle.branch",
+      command = 'cd ~ && git branch --format "%(refname:short)\t%(subject)" 2>/dev/null',
+      on_select = { shell = "cd ~ && git switch {value}" },
+    }),
     item("dev.notify", "Say Hello", {
       symbol = "bell",
       action = function(query)

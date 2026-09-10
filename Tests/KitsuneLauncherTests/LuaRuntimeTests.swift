@@ -89,6 +89,32 @@ import Testing
     #expect(load.node("search")?.headerTitle == "Search the web")
 }
 
+@Test func onSelectDecodesAsAnActionOnTheNode() async {
+    let (runtime, load, directory) = await kitsuneLoadConfig("""
+    return {
+      items = {
+        { id = "root", label = "Kitsune" },
+        { id = "windows", label = "Windows",
+          command = "wm list-windows",
+          on_select = { shell = "wm focus --window-id {value}" } },
+        { id = "plain", label = "Plain", command = "printf 'x'" },
+      },
+    }
+    """)
+    defer { kitsuneRemove(directory); _ = runtime }
+
+    #expect(load.error == nil)
+    if case .shell(let command)? = load.node("windows")?.onSelect {
+        #expect(command == "wm focus --window-id {value}")
+    } else {
+        Issue.record("expected a shell on_select")
+    }
+    // `on_select` says what the *rows* do, so the node itself stays a submenu — the
+    // same as `provider` and `command` alone.
+    #expect(load.node("windows")?.kind == .menu)
+    #expect(load.node("plain")?.onSelect == nil)
+}
+
 @Test func settingsDecodeFromConfig() async {
     let (runtime, load, directory) = await kitsuneLoadConfig("""
     return {

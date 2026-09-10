@@ -687,6 +687,21 @@ final class LuaRuntime: @unchecked Sendable {
             ?? appleScript.map(ScriptAction.appleScript)
             ?? open.map(ScriptAction.open)
             ?? url.map(ScriptAction.url)
+        // Same four keys an item itself takes, so there is one action vocabulary and
+        // not two. It is read from a nested table rather than reusing the item's own
+        // keys because a node can be both: `command` rows plus a `shell` of its own.
+        lua_getfield(state, -1, "on_select")
+        var onSelect: ScriptAction?
+        if lua_type(state, -1) == LUA_TTABLE {
+            func nested(_ name: String) -> String? {
+                lua_getfield(state, -1, name); defer { lua_settop(state, -2) }; return luaString(state, -1)
+            }
+            onSelect = nested("shell").map(ScriptAction.shell)
+                ?? nested("applescript").map(ScriptAction.appleScript)
+                ?? nested("open").map(ScriptAction.open)
+                ?? nested("url").map(ScriptAction.url)
+        }
+        lua_settop(state, -2)
         let kind: RowKind = actionReference != nil || scriptAction != nil ? .action : .menu
         return MenuNode(
             id: id,
@@ -700,6 +715,7 @@ final class LuaRuntime: @unchecked Sendable {
             aliases: aliases,
             provider: provider,
             command: command,
+            onSelect: onSelect,
             actionReference: actionReference,
             scriptAction: scriptAction,
             order: order,
