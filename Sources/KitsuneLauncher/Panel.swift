@@ -182,6 +182,18 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
         window?.orderOut(nil)
     }
 
+    /// The hidden panel has no useful list working set. Reloading with no rows lets
+    /// AppKit release its reusable row-view tree, while dropping `rows` releases the
+    /// images carried by the last menu. `MenuController` repopulates both before the
+    /// next showing.
+    func trimHiddenList() {
+        guard window?.isVisible != true else { return }
+        rows = []
+        hints = []
+        table.reloadData()
+        FileBrowser.clearIconCache()
+    }
+
     func setQuery(_ query: String) {
         guard input.stringValue != query else { return }
         input.stringValue = query

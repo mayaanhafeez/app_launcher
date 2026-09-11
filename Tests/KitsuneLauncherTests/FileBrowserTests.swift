@@ -179,7 +179,7 @@ private func pathController(nodes extra: [MenuNode] = []) -> MenuController {
     controller.update(query: root.path + "/")
 
     // The rows are enumerated off the main thread, so they arrive after the takeover.
-    #expect(await kitsuneWaitUntil(timeout: 3) { seen.value.contains("notes.txt") })
+    #expect(await kitsuneWaitUntil { seen.value.contains("notes.txt") })
     #expect(!seen.value.contains("Tools"))
     #expect(title.value == root.path)
 }

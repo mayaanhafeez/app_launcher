@@ -130,3 +130,16 @@ private func rankingController() -> MenuController {
     #expect(store.bonus(for: "a") > 0)
     #expect(try! FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
 }
+
+@MainActor
+@Test func usageStoreEvictsLeastRecentlyUsedRecords() {
+    let store = UsageStore(url: nil)
+    let start = Date(timeIntervalSince1970: 1_000)
+    for index in 0...UsageStore.recordLimit {
+        store.record("row-\(index)", now: start.addingTimeInterval(Double(index)))
+    }
+
+    #expect(store.bonus(for: "row-0", now: start) == 0)
+    #expect(store.bonus(for: "row-1", now: start.addingTimeInterval(1)) > 0)
+    #expect(store.bonus(for: "row-\(UsageStore.recordLimit)", now: start.addingTimeInterval(Double(UsageStore.recordLimit))) > 0)
+}

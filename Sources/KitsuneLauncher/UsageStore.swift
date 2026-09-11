@@ -10,6 +10,8 @@ import Foundation
 /// remember anything across activations.
 @MainActor
 final class UsageStore {
+    static let recordLimit = 5_000
+
     private struct Record: Codable {
         var count: Int
         var lastUsed: Date
@@ -43,6 +45,7 @@ final class UsageStore {
         record.count += 1
         record.lastUsed = now
         records[id] = record
+        pruneIfNeeded()
         scheduleFlush()
     }
 
@@ -69,6 +72,15 @@ final class UsageStore {
     private func load() {
         guard let url, let data = try? Data(contentsOf: url) else { return }
         records = (try? JSONDecoder().decode([String: Record].self, from: data)) ?? [:]
+        pruneIfNeeded()
+    }
+
+    private func pruneIfNeeded() {
+        guard records.count > Self.recordLimit else { return }
+        let excess = records.count - Self.recordLimit
+        for id in records.sorted(by: { $0.value.lastUsed < $1.value.lastUsed }).prefix(excess).map(\.key) {
+            records.removeValue(forKey: id)
+        }
     }
 
     /// Writes are coalesced: activation is on the hot path to launching something, and
