@@ -273,7 +273,7 @@ private func ipcSendLargeRaw(_ payload: Data, to path: String) -> Data {
 
     // The request has reached the handler and is waiting on a load that has not
     // finished; nothing has been written back yet.
-    #expect(await kitsuneWaitUntil(timeout: 3) { !answers.value.isEmpty })
+    #expect(await kitsuneWaitUntil { !answers.value.isEmpty })
     answers.value.forEach { $0("Config: boom") }
 
     let response = try? JSONDecoder().decode(IPCResponse.self, from: await reply)

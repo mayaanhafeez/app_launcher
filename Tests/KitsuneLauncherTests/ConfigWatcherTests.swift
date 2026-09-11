@@ -69,12 +69,23 @@ private func settle() async { try? await Task.sleep(nanoseconds: 200_000_000) }
     #expect(await kitsuneWaitUntil(timeout: 3) { changes.value > seen })
 }
 
-// NOTE: there is deliberately no test asserting that the 80ms window *coalesces* a
-// burst of writes, because it does not: `scheduleChange` queues one delayed
-// callback per vnode event rather than superseding the pending one, so eight
-// in-place rewrites were measured to produce sixteen `onChange` calls (and so
-// sixteen full config reloads). Pinning that here would enshrine it; it is
-// reported instead.
+@Test func watcherCoalescesABurstOfWrites() async throws {
+    let directory = kitsuneTemporaryDirectory("kitsune-watch")
+    defer { kitsuneRemove(directory) }
+    let config = directory.appendingPathComponent("config.lua")
+    try "return { items = {} }".write(to: config, atomically: true, encoding: .utf8)
+
+    let (watcher, changes) = try startedWatcher(in: directory)
+    defer { _ = watcher }
+    await settle()
+    for index in 0..<8 {
+        try kitsuneRewriteInPlace(config, "return { value = \(index) }")
+    }
+
+    #expect(await kitsuneWaitUntil(timeout: 3) { changes.value > 0 })
+    await settle()
+    #expect(changes.value == 1)
+}
 
 @Test func fileOnlyWatcherSeesWritesWithoutADirectoryWatch() async throws {
     // The `~/.config/theme` pointer is watched this way: no directory watch (the

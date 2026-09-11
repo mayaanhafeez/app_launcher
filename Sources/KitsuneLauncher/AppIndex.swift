@@ -7,6 +7,7 @@ final class AppIndex: NSObject {
     private let worker = DispatchQueue(label: "kitsune.app-index", qos: .utility)
     private var scanSpec = AppScanSpec()
     private var iconPoints = thumbnailSize
+    private var scanGeneration = 0
     private var iconCache: [String: NSImage] = [:]
     private var iconOrder: [String] = []
     /// Sized to hold a whole app list, not a screenful. At 64 the apps menu — 151 rows
@@ -52,6 +53,8 @@ final class AppIndex: NSObject {
     }
 
     private func rescan() {
+        scanGeneration += 1
+        let generation = scanGeneration
         let roots = Self.defaultRoots + scanSpec.paths.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
         let depth = scanSpec.depth
         let points = iconPoints
@@ -59,7 +62,10 @@ final class AppIndex: NSObject {
             let built = Self.appPaths(in: roots, depth: depth)
                 .compactMap { Self.makeEntry(path: $0, iconPoints: points) }
                 .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-            Task { @MainActor [weak self] in self?.replace(built) }
+            Task { @MainActor [weak self] in
+                guard let self, generation == self.scanGeneration else { return }
+                self.replace(built)
+            }
         }
     }
 

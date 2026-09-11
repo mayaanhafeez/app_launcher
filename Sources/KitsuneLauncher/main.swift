@@ -286,6 +286,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func dismiss() {
         panel.hide()
         menu.open()
+        panel.trimHiddenList()
     }
 }
 

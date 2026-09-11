@@ -116,12 +116,15 @@ enum FileBrowser {
 
     private static let iconCache = IconCache()
 
+    @MainActor
+    static func clearIconCache() { iconCache.clear() }
+
     /// Bounded, and cleared wholesale when it fills: this is a typing cache, not a
     /// store, and the cost of a miss is one icon.
     private final class IconCache: @unchecked Sendable {
         private let lock = NSLock()
         private var entries: [String: NSImage] = [:]
-        private let capacity = 512
+        private let capacity = 128
 
         func value(for path: String) -> NSImage? {
             lock.lock(); defer { lock.unlock() }
@@ -130,8 +133,13 @@ enum FileBrowser {
 
         func store(_ image: NSImage, for path: String) {
             lock.lock(); defer { lock.unlock() }
-            if entries.count >= capacity { entries.removeAll(keepingCapacity: true) }
+            if entries.count >= capacity { entries.removeAll() }
             entries[path] = image
+        }
+
+        func clear() {
+            lock.lock(); defer { lock.unlock() }
+            entries.removeAll()
         }
     }
 }
