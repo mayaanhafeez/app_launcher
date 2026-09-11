@@ -25,8 +25,23 @@ final class MenuController {
     var search = SearchSpec()
     var files = FileSpec()
     var providerLimits = ProviderSpec()
+    /// See `Settings.showSearchOnly`. Held here as well as on the panel because the two
+    /// halves are separate: this one withholds root's rows, the panel one collapses the
+    /// card around an empty list whatever produced it.
+    var showSearchOnly = false
     private var location: MenuLocation = .menu("root")
     private var navigation: [Frame] = []
+    /// Which menu the command cache holds answers for. A command reports live state —
+    /// a window list, a container list — and that answer is only good while the menu
+    /// stays open, so arriving at a different menu starts from an empty cache. The
+    /// cache is there to stop backspacing through a query respawning a process, not to
+    /// remember what the machine looked like the last time the user was here.
+    private var commandMenu: String?
+    /// Which menu the retained provider/command/file rows belong to. They survive a
+    /// keystroke so the list does not collapse and regrow between the synchronous
+    /// emission and the asynchronous one; they must not survive a move to a different
+    /// menu, where they would describe somewhere the user has left.
+    private var asyncMenu: String?
 
     /// The id an actions menu reports. It deliberately matches no node, which is what
     /// keeps the back row present (`decorated` only withholds it at `root`) and keeps
@@ -402,24 +417,61 @@ final class MenuController {
         let built = built(query: trimmed)
         let baseRows = built.rows
         let title = built.title
-        onRows?(title, decorated(baseRows, menu: menu))
+
+        // `show_search_only` opens the panel as a bare field, the way Spotlight does:
+        // at root with nothing typed there are no rows at all, and the first keystroke
+        // is what expands the card. Only the panel's path is affected — `rows(route:)`
+        // still answers in full, so `kitsunectl list root` is unchanged, and a submenu
+        // still shows its contents on arrival rather than making the user guess.
+        if showSearchOnly, menu == "root", trimmed.isEmpty {
+            providerGeneration += 1          // strand anything already in flight
+            asyncMenu = menu
+            providerRows = []
+            commandRows = []
+            fileRows = []
+            commands.cancel()
+            onRows?(title, decorated([], menu: menu))
+            return
+        }
 
         // A provider and a command both belong to the submenu that declares them and
         // supply that submenu's rows while it is open — entering `search` is what runs
         // `search`'s provider, not merely seeing it listed one level up.
         providerGeneration += 1
         let generation = providerGeneration
-        providerRows = []
-        commandRows = []
-        fileRows = []
         let node = nodes.first(where: { $0.id == menu })
 
+        // Asynchronous rows are **kept across a keystroke in the same menu**. Clearing
+        // them here and letting them land again a few milliseconds later made the list
+        // collapse and regrow on every key — two `update` passes, each a reload, a
+        // resize and a selection reset. It stayed invisible while a provider returned
+        // nothing (both emissions matched, so `update`'s guard dropped the second) and
+        // began flickering at exactly the keystroke where the provider first
+        // contributed a row: `smart` adds its search rows at two characters.
+        //
+        // Only a source that is about to answer keeps its rows. One that will not run
+        // has no replacement coming, so its rows go now rather than lingering.
+        // `asyncMenu` is not `commandMenu`: this one tracks what the retained rows
+        // describe, that one what the command cache holds, and it is deliberately
+        // forgotten on the way out so re-entry respawns.
+        if asyncMenu != menu {
+            asyncMenu = menu
+            providerRows = []
+            commandRows = []
+            fileRows = []
+        }
+        if pathQuery(menu: menu, query: trimmed) == nil { fileRows = [] }
+        if node?.provider == nil { providerRows = [] }
+        if node?.command.isBlank ?? true { commandRows = [] }
+
         // Both sources are asynchronous and either may answer first, so each stores
-        // its own rows and re-emits the union rather than the base plus itself.
+        // its own rows and re-emits the union rather than the base plus itself. The
+        // first call is the synchronous one, carrying whatever was retained above.
         let emit: @MainActor () -> Void = { [weak self] in
             guard let self, generation == self.providerGeneration else { return }
             self.onRows?(title, self.decorated(baseRows + self.fileRows + self.providerRows + self.commandRows, menu: menu))
         }
+        emit()
 
         // Reading a directory can block — a network mount, a folder with thousands of
         // entries — so it happens off the main thread under the same generation guard
@@ -463,13 +515,20 @@ final class MenuController {
         }
 
         if let command = node?.command, !command.isBlank {
+            if commandMenu != menu {
+                commandMenu = menu
+                commands.clearCache()
+            }
             commands.rows(command: command, menuID: menu, query: trimmed) { [weak self] rows in
                 guard let self, generation == self.providerGeneration else { return }
                 self.commandRows = rows
                 emit()
             }
         } else {
-            // Navigating away from a command menu has to kill whatever it started.
+            // Navigating away from a command menu has to kill whatever it started, and
+            // forget where the cache came from: coming back is a fresh look at the
+            // machine even when the query is the one that was typed last time.
+            commandMenu = nil
             commands.cancel()
         }
     }

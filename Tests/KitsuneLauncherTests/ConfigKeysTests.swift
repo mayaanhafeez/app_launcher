@@ -255,3 +255,47 @@ import Testing
     #expect(load.settings?.terminal == TerminalSpec())
     #expect(load.settings?.terminal.app == "Terminal")
 }
+
+@Test func showSearchOnlyDecodes() async {
+    let (runtime, load, directory) = await kitsuneLoadConfig("""
+    return { show_search_only = true, items = { { id = "root", label = "Go" } } }
+    """)
+    defer { kitsuneRemove(directory); _ = runtime }
+    #expect(load.settings?.showSearchOnly == true)
+
+    let (defaultRuntime, defaultLoad, defaultDirectory) = await kitsuneLoadConfig("""
+    return { items = { { id = "root", label = "Go" } } }
+    """)
+    defer { kitsuneRemove(defaultDirectory); _ = defaultRuntime }
+    #expect(defaultLoad.settings?.showSearchOnly == false)
+}
+
+@MainActor
+@Test func showSearchOnlyWithholdsRootRowsUntilSomethingIsTyped() {
+    let controller = MenuController(appIndex: AppIndex(), runtime: LuaRuntime())
+    controller.nodes = [
+        MenuNode(id: "root", parent: "", kind: .menu, label: "Go", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: nil, order: 0),
+        MenuNode(id: "tools", parent: "root", kind: .menu, label: "Tools", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: nil, order: 1),
+        MenuNode(id: "tools.hammer", parent: "tools", kind: .action, label: "Hammer", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: .url(""), order: 2),
+    ]
+    var labels: [String] = []
+    controller.onRows = { _, rows in labels = rows.map(\.label) }
+    controller.showSearchOnly = true
+
+    // Root opens empty: the field alone, and the first keystroke is what fills it.
+    controller.open()
+    #expect(labels.isEmpty)
+    controller.update(query: "too")
+    #expect(labels == ["Tools"])
+    controller.update(query: "")
+    #expect(labels.isEmpty)
+
+    // A submenu is unaffected — arriving somewhere deliberately still shows what is
+    // there, or the user would have to guess at the contents of a menu they opened.
+    controller.update(query: "too")
+    controller.activate(DisplayRow(id: "tools", kind: .menu, label: "Tools", detail: "", symbol: "", image: nil, score: 0, section: "current"))
+    #expect(labels.contains("Hammer"))
+
+    // And the CLI's synchronous snapshot still answers in full for root.
+    #expect(controller.rows(route: "root", query: "").rows.map(\.label) == ["Tools"])
+}
