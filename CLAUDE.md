@@ -21,6 +21,14 @@ prompts after a rebuild.
 
 There is no linter or formatter configured.
 
+## Git workflow
+
+- Create every feature or bug-fix branch from `main`.
+- Merge the branch into `dev` for testing.
+- After testing is approved, merge the same branch into `main`.
+- Delete the feature or bug-fix branch after it is merged into `main`.
+- Do not make feature or bug-fix commits directly on `dev` or `main`.
+
 ## Architecture
 
 Two executables from one SwiftPM package (`Package.swift`), plus a vendored Lua 5.4.8 C target:

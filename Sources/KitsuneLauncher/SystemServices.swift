@@ -328,6 +328,7 @@ final class ConfigWatcher: @unchecked Sendable {
     private let queue = DispatchQueue(label: "kitsune.config-watch")
     private var directorySource: DispatchSourceFileSystemObject?
     private var fileSources: [DispatchSourceFileSystemObject] = []
+    private var pendingChange: DispatchWorkItem?
     var onChange: (() -> Void)?
 
     private let watchesDirectory: Bool
@@ -444,11 +445,15 @@ final class ConfigWatcher: @unchecked Sendable {
     }
 
     private func scheduleChange() {
-        queue.asyncAfter(deadline: .now() + debounce) { [weak self] in
+        pendingChange?.cancel()
+        let change = DispatchWorkItem { [weak self] in
             guard let self else { return }
+            pendingChange = nil
             rearmFileWatches()
             onChange?()
         }
+        pendingChange = change
+        queue.asyncAfter(deadline: .now() + debounce, execute: change)
     }
 }
 
