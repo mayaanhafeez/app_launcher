@@ -708,6 +708,28 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
 }
 
 final class RowView: NSTableCellView {
+    /// SF Symbols are SVG-backed, and `NSImage(systemSymbolName:)` measures ~18us a
+    /// call. That is nothing on its own and everything in aggregate: `configure` runs
+    /// for every visible row on every reload, and a reload is every keystroke — about
+    /// 0.37ms per keypress for twenty rows, which was more than the whole fuzzy match
+    /// cost beside it.
+    ///
+    /// Safe to share one instance per name because nothing here mutates the image:
+    /// the size comes from constraints and the tint is set on the image *view*
+    /// (`contentTintColor`), not the image. `MenuBarItem.tinted` paints into a copy
+    /// for exactly the opposite reason — it does need to mutate one.
+    ///
+    /// Unbounded by design: the key space is the set of symbol names a config names,
+    /// which is small, fixed at reload, and already resident as row data.
+    private static var symbolCache: [String: NSImage] = [:]
+
+    private static func symbolImage(_ name: String) -> NSImage? {
+        if let cached = symbolCache[name] { return cached }
+        guard let image = NSImage(systemSymbolName: name, accessibilityDescription: nil) else { return nil }
+        symbolCache[name] = image
+        return image
+    }
+
     private let selectionBackground = NSView()
     private let selectionBar = NSView()
     private let divider = NSView()
@@ -839,7 +861,7 @@ final class RowView: NSTableCellView {
         iconHeight.constant = theme.iconSize + theme.space(6)
         iconLeading.constant = gutter + (slot - iconWidth.constant) / 2
 
-        symbol.image = item.image == nil && !item.symbol.isEmpty ? NSImage(systemSymbolName: item.symbol, accessibilityDescription: nil) : nil
+        symbol.image = item.image == nil && !item.symbol.isEmpty ? Self.symbolImage(item.symbol) : nil
         symbol.isHidden = symbol.image == nil
         symbolWidth.constant = theme.iconSize
         symbolHeight.constant = theme.iconSize

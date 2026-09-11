@@ -91,7 +91,10 @@ return load {
   -- `providers`, which already holds the provider functions themselves.
   provider_limits = { timeout = 0.15, instructions = 1000000, debounce = 0 },
 
-  -- Budget for `command = "..."` rows. Stricter than the Lua one, because this spawns a
+  -- Budget for `command = "..."` rows -- a node's stdout-backed rows, whose output is
+  -- text (`label`<TAB>`detail`, or JSON with `label`/`detail`/`symbol`/`value`/`notice`)
+  -- and whose action is the node's own `on_select = { shell = "... {value}" }`.
+  -- Stricter than the Lua one, because this spawns a
   -- real process while you type: `debounce` is a quiet period before anything is
   -- spawned, `timeout` kills what overstays, `max_bytes` bounds a command that prints
   -- without stopping. `login = true` runs a login shell so it picks up your own PATH --

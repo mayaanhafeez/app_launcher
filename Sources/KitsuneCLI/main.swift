@@ -15,7 +15,12 @@ if arguments.first == "--help" || arguments.first == "help" {
 // and joining a single argument leaves every other verb exactly as it was.
 let argument = arguments.dropFirst().joined(separator: " ")
 let request = Request(command: arguments.first ?? "toggle", argument: argument.isEmpty ? nil : argument)
-let socketPath = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Containers/com.kitsune.launcher/Data/tmp/kitsune.sock").path
+// Which build to talk to. The host derives its socket from its own bundle identifier,
+// so `Kitsune (Dev)` listens somewhere else entirely; without this the CLI could only
+// ever reach the main app, and driving a dev build meant editing this line.
+//   KITSUNE_BUNDLE_ID=com.kitsune.launcher.dev kitsunectl ping
+let bundleIdentifier = ProcessInfo.processInfo.environment["KITSUNE_BUNDLE_ID"] ?? "com.kitsune.launcher"
+let socketPath = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Containers/\(bundleIdentifier)/Data/tmp/kitsune.sock").path
 let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
 guard descriptor >= 0 else { fputs("kitsunectl: socket failed\n", stderr); exit(1) }
 defer { close(descriptor) }

@@ -163,6 +163,48 @@ An `NSMetadataQuery` for app bundles used to live here and was removed: nothing 
 methods), so its results were never consumed. Wiring Spotlight back up means adding those notification observers — and
 keeping the directory scan regardless, since Spotlight indexes nothing under `/System`.
 
+### Command rows
+
+`CommandRunner` (`CommandRunner.swift`) is the second async row source: a node's `command` is spawned while its submenu
+is open and its stdout becomes rows. It exists because a provider cannot look at the machine — a provider is re-loaded
+into a sandboxed state per keystroke — so `brew search`, `mdfind` and `aerospace list-windows` have to be spawned by the
+host, debounced, deadlined and byte-capped.
+
+**Output is data, never behaviour.** A row supplies `label`, `detail`, `symbol`, `value` and `notice`, and what
+activating it does comes from `on_select` on the node that declared the command. The rows used to be able to name their
+own `shell`/`applescript` — and a row is frequently a line the user did not write. A browser tab title is set by
+whatever page is open, `aerospace`'s `--format` output is tab-separated and its window list is positional, so a title
+carrying a newline and tabs split into a whole second record whose first field became the command. That is the one path
+in the app where data an attacker can influence became something that runs; everything else needs code execution as the
+user first.
+
+`on_select` is resolved per row in `parse`, and the resolved `ScriptAction` is carried on `DisplayRow.action` exactly as
+a provider row's is — so activation and the actions menu (`RowActions.entries` reads `row.action`) both keep working
+with no second dispatch path. `{value}` is substituted by `ScriptAction.resolved(query:value:)`, escaped per
+destination like `{query}` and in the **same pass**, so a value containing the literal text `{query}` is not given a
+second reading. `value` defaults to the label, which is what keeps the tab-separated form a one-liner; `notice = true`
+opts a row out, since an "on_select" that applies to every row would otherwise make "No rates for EUR" activatable.
+
+The escaping only covers the layer the host can see. An `applescript` that itself runs `do shell script` is a shell
+string inside an AppleScript string, and the plugin owns the inner layer — `Config/plugins/aerospace.lua` splices
+`{value}` in with AppleScript's own `quoted form of` for exactly that reason. Its four menus also re-resolve `$wm`
+inside the template, since the rows no longer carry which of aerospace/hyprspace answered.
+
+The cache is keyed by the resolved script, plus the query when — and only when — the `on_select` is what reads
+`{query}`: a static command whose action is query-dependent would otherwise be served rows carrying the query that
+first built them.
+
+### Trust boundaries
+
+`~/.config/kitsune` and the IPC socket are **full trust by design**. A config is Lua the user wrote, it can already
+`shell` anything, and the socket is `0600` in a container-relative directory — anyone who can write to either already
+has code execution as the user. The sandboxing around providers and themes is about containing *the config's own
+mistakes*, not about defending against a hostile config.
+
+What is **not** trusted is anything the app reads at runtime: command output, window titles, file names, clipboard
+contents, app metadata. Those are values, and the rule is that they stay values — a new feature that lets one of them
+name a command, a path to open, or a URL to visit is re-opening the hole `on_select` closed.
+
 ### Filesystem path mode
 
 `FileBrowser` (`FileBrowser.swift`) is the third async row source, beside providers and commands. A query starting `/`
