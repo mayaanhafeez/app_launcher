@@ -43,10 +43,19 @@ Two executables from one SwiftPM package (`Package.swift`), plus a vendored Lua 
   `role` accessors resolve semantic roles against a priority list of key names. Adding a
   format means adding key names to those lists, not a parser. **The launcher ships no
   palettes of its own** — a name resolves against whatever the machine already has, and
-  `resolve` searches `~/.config/kitsune/themes/` *before* the other tools' directories.
-  That ordering is the override slot: `Config/themes/rose-pine.toml` exists because
+  `resolve` stats a fixed candidate list, never a scan: the first file that exists and
+  parses wins. `~/.config/kitsune/themes/` comes *before* the other tools' directories,
+  and that ordering is the override slot — `Config/themes/rose-pine.toml` exists because
   Omarchy ships its `rose-pine` as the light Dawn variant, so `palette = "auto"` went
-  light while the rest of the system was on dark Rosé Pine.
+  light while the rest of the system was on dark Rosé Pine. `palette_paths` in
+  `theme.lua` extends the list, sitting after that slot and before the built-in
+  locations, so reaching a collection nothing here has heard of does not cost the
+  shadowing. An entry is a directory or a `{name}` template, because the built-in
+  locations are not one shape — ghostty names a bare file, kitty adds an extension, and
+  Omarchy makes the theme the *directory* (`<name>/colors.toml`), which a directory-only
+  list cannot express. It is read in `ThemeRuntime.load` and passed straight to
+  `resolve` rather than carried on `Theme`, which is the appearance surface: this is an
+  input to *finding* the scheme, not a token the panel draws with.
 - **`CLua`** — `Vendor/lua-5.4.8/src` compiled in-tree. `Vendor/lua-5.4.8/src/include/CLua.h` is a hand-written shim
   exposing what Swift can't import from Lua's headers (`LUA_REGISTRYINDEX` is a macro; `lua_error` is variadic-adjacent).
   Add to that shim rather than reaching into the Lua sources. Treat everything else under `Vendor/` as upstream — do not
