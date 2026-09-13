@@ -118,3 +118,21 @@ private func hex(_ color: NSColor?) -> String? {
     #expect(hex(theme.fg) == "fefefe")
     #expect(theme.radius == radius)   // palettes carry colour only
 }
+
+// The one palette the repo ships, and only because Omarchy's `rose-pine` is the light
+// Dawn variant: if this file ever reads light again, `palette = "auto"` is back to
+// lighting the panel while the rest of the system is dark.
+@Test func shippedRosePineOverrideIsTheDarkVariant() throws {
+    let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        .deletingLastPathComponent().deletingLastPathComponent()
+    let palette = try #require(Palette.load(contentsOf: repo.appendingPathComponent("Config/themes/rose-pine.toml")))
+
+    #expect(palette.name == "rose-pine")
+    #expect(hex(palette.background) == "191724")   // base, not Dawn's faf4ed
+    #expect(hex(palette.foreground) == "e0def4")
+    #expect(hex(palette.surface) == "1f1d2e")
+    #expect(hex(palette.accent) == "c4a7e7")       // iris, as set-theme picks for this theme
+    #expect(hex(palette.selection) == "403d52")
+    #expect(hex(palette.muted) == "6e6a86")
+    #expect(palette.border != nil)
+}
