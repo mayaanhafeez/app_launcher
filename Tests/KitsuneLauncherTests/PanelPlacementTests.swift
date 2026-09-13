@@ -100,10 +100,27 @@ private func place(
     #expect(PanelPlacement.screenIndex(.active, screens: screens, pointer: NSPoint(x: 2000, y: 100), focusedWindow: nil) == 1)
 }
 
-@Test func anUnmatchedLookupFallsBackToThePrimaryDisplay() {
+@Test func anUnmatchedLookupFallsBackToTheOnlyOrPrimaryDisplay() {
     // A pointer on a display that just disconnected, or no screens at all.
     #expect(PanelPlacement.screenIndex(.mouse, screens: [left], pointer: NSPoint(x: 5000, y: 5000), focusedWindow: nil) == 0)
     #expect(PanelPlacement.screenIndex(.active, screens: [], pointer: .zero, focusedWindow: nil) == 0)
+}
+
+@Test func aPointerOutsideEveryDisplayPicksTheNearestOne() {
+    // The display set changing is the only time this happens: a monitor unplugged while
+    // the pointer was on it strands the pointer outside every remaining screen. Falling
+    // back to the primary display would anchor the card on a display the user is not
+    // looking at, in that display's coordinates.
+    let screens = [left, right]
+    #expect(PanelPlacement.screenIndex(.mouse, screens: screens, pointer: NSPoint(x: 4000, y: 500), focusedWindow: nil) == 1)
+    #expect(PanelPlacement.screenIndex(.mouse, screens: screens, pointer: NSPoint(x: -400, y: 500), focusedWindow: nil) == 0)
+    // Above the displays, not beside them: the nearest is still the one it is over.
+    #expect(PanelPlacement.screenIndex(.mouse, screens: screens, pointer: NSPoint(x: 1900, y: 4000), focusedWindow: nil) == 1)
+
+    // `active` resolves the focused window the same way once neither it nor the pointer
+    // lands on a display.
+    let offToTheRight = NSRect(x: 3400, y: 200, width: 400, height: 300)
+    #expect(PanelPlacement.screenIndex(.active, screens: screens, pointer: NSPoint(x: 3000, y: 5000), focusedWindow: offToTheRight) == 1)
 }
 
 // MARK: - theme.lua
