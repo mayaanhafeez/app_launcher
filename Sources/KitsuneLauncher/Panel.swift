@@ -101,6 +101,7 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
     /// Held for the process lifetime: the panel controller is owned by the app
     /// delegate and outlives every other object, so there is nothing to tear down.
     private var keyMonitor: Any?
+    private var screenObserver: Any?
 
     var onQuery: ((String) -> Void)?
     var onActivate: ((DisplayRow) -> Void)?
@@ -130,6 +131,33 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
         buildUI(panel)
         apply(theme: theme)
         installKeyMonitor()
+        observeScreenChanges()
+    }
+
+    /// Every placement input — the screen list, the pointer, the focused window — is read
+    /// at `show()` and then held for the showing, so a display set that changes *after*
+    /// that read leaves the card anchored in geometry that no longer exists. Plugging a
+    /// monitor in moves the global coordinate origin, which is why the symptom was a card
+    /// far above its anchor rather than a few pixels out.
+    ///
+    /// AppKit has already updated `NSScreen.screens` by the time this fires, so the fix is
+    /// to drop the held anchors and re-place. A visible panel is re-anchored immediately;
+    /// a hidden one only needs `anchoredTop` cleared, since `show()` re-reads the rest.
+    private func observeScreenChanges() {
+        screenObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.screenParametersDidChange() }
+        }
+    }
+
+    private func screenParametersDidChange() {
+        anchoredTop = nil
+        guard window?.isVisible == true else { return }
+        captureAnchors()
+        resizeToContent()
     }
 
     /// Normal mode has to intercept plain characters, and `performKeyEquivalent` is
