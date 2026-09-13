@@ -43,10 +43,42 @@ struct Palette: Sendable {
         return Palette(name: name, values: values)
     }
 
+    /// The extensions a bare name is tried with in a directory that holds scheme files
+    /// one-per-theme. The empty one is last and covers ghostty, whose themes carry none.
+    static let extensions = ["toml", "yaml", "yml", "conf", "theme", ""]
+
+    /// Every file a directory could hold for `base`, in extension order.
+    private static func candidates(in directory: URL, named base: String) -> [URL] {
+        extensions.map { directory.appendingPathComponent($0.isEmpty ? base : "\(base).\($0)") }
+    }
+
+    /// Expands one `palette_paths` entry for `base`.
+    ///
+    /// An entry is either a **template** containing `{name}` — one candidate, spelled
+    /// exactly as written — or a plain **directory**, which is tried with every
+    /// extension, as `~/.config/kitsune/themes` is. Both shapes are needed because the
+    /// built-in locations are not one shape: ghostty names a bare file, kitty adds an
+    /// extension, and Omarchy makes the *directory* the theme (`<name>/colors.toml`),
+    /// which no directory-only list can express.
+    private static func expand(_ entry: String, named base: String) -> [URL] {
+        let trimmed = entry.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        let path = (trimmed as NSString).expandingTildeInPath
+        guard path.contains("{name}") else {
+            return candidates(in: URL(fileURLWithPath: path), named: base)
+        }
+        return [URL(fileURLWithPath: path.replacingOccurrences(of: "{name}", with: base))]
+    }
+
     /// Resolves a `palette = ...` value: an explicit path, or a bare name looked up
     /// across the scheme directories that exist on this machine. `auto` follows
     /// `~/.config/theme`, so `set-theme` retints the launcher along with everything else.
-    static func resolve(_ reference: String, configDirectory: URL) -> Palette? {
+    ///
+    /// `searchPaths` is `palette_paths` from `theme.lua`, and sits between the config
+    /// directory and the built-in locations: a config can reach a scheme collection this
+    /// list has never heard of without giving up the override slot that lets
+    /// `themes/<name>` shadow a tool shipping the same name.
+    static func resolve(_ reference: String, configDirectory: URL, searchPaths: [String] = []) -> Palette? {
         let home = FileManager.default.homeDirectoryForCurrentUser
         var name = reference.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return nil }
@@ -65,10 +97,8 @@ struct Palette: Sendable {
         let underscored = name.replacingOccurrences(of: "-", with: "_")
         var candidates: [URL] = []
         for base in [name, underscored] {
-            for ext in ["toml", "yaml", "yml", "conf", "theme", ""] {
-                let filename = ext.isEmpty ? base : "\(base).\(ext)"
-                candidates.append(configDirectory.appendingPathComponent("themes/\(filename)"))
-            }
+            candidates += self.candidates(in: configDirectory.appendingPathComponent("themes"), named: base)
+            for entry in searchPaths { candidates += expand(entry, named: base) }
             candidates.append(home.appendingPathComponent("omarchy/themes/\(base)/colors.toml"))
             candidates.append(home.appendingPathComponent(".config/kitty/themes/\(base).conf"))
             candidates.append(home.appendingPathComponent(".config/ghostty/themes/\(base)"))

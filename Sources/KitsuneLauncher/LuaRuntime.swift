@@ -621,7 +621,7 @@ final class LuaRuntime: @unchecked Sendable {
     /// The array under `field` on the table at the top of the stack, or nil when the
     /// key is absent or isn't a table — a missing key has to leave the default in
     /// place rather than blanking it.
-    private static func stringList(_ state: OpaquePointer, field: String) -> [String]? {
+    fileprivate static func stringList(_ state: OpaquePointer, field: String) -> [String]? {
         lua_getfield(state, -1, field)
         defer { lua_settop(state, -2) }
         guard lua_type(state, -1) == LUA_TTABLE else { return nil }
@@ -864,8 +864,14 @@ final class ThemeRuntime: @unchecked Sendable {
         var theme = Theme()
         func string(_ key: String) -> String? { lua_getfield(state, -1, key); defer { lua_settop(state, -2) }; return luaString(state, -1) }
         // The palette seeds the colour roles; explicit keys below still override it.
+        // `palette_paths` is read here rather than carried on `Theme`, which is the
+        // appearance surface: this is an input to finding the scheme, not a token the
+        // panel ever draws with.
+        let searchPaths = LuaRuntime.stringList(state, field: "palette_paths") ?? []
         if let reference = string("palette"), !reference.isEmpty,
-           let palette = Palette.resolve(reference, configDirectory: file.deletingLastPathComponent()) {
+           let palette = Palette.resolve(reference,
+                                         configDirectory: file.deletingLastPathComponent(),
+                                         searchPaths: searchPaths) {
             theme.apply(palette: palette)
             paletteName = palette.name
         }
