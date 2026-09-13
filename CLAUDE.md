@@ -41,7 +41,18 @@ Two executables from one SwiftPM package (`Package.swift`), plus a vendored Lua 
   `colors.toml`, kitty `.conf`, ghostty and btop `.theme` are all flat `key → hex` files
   differing only in separator and key vocabulary, so one tokenizer reads every dialect and
   `role` accessors resolve semantic roles against a priority list of key names. Adding a
-  format means adding key names to those lists, not a parser.
+  format means adding key names to those lists, not a parser. The launcher ships no
+  palettes of its own: `resolve` stats a fixed candidate list — never a scan — and the
+  first file that exists and parses wins. `palette_paths` in `theme.lua` extends that
+  list, and sits **after** `~/.config/kitsune/themes` and **before** the built-in
+  locations, so a config can reach a collection nothing here has heard of without
+  giving up `themes/<name>` as the slot that shadows a tool shipping the same name. An
+  entry is a directory or a `{name}` template, because the built-in locations are not
+  one shape — ghostty names a bare file, kitty adds an extension, and Omarchy makes the
+  theme the *directory* (`<name>/colors.toml`), which a directory-only list cannot
+  express. It is read in `ThemeRuntime.load` and passed straight to `resolve` rather
+  than carried on `Theme`, which is the appearance surface — this is an input to
+  *finding* the scheme, not a token the panel draws with.
 - **`CLua`** — `Vendor/lua-5.4.8/src` compiled in-tree. `Vendor/lua-5.4.8/src/include/CLua.h` is a hand-written shim
   exposing what Swift can't import from Lua's headers (`LUA_REGISTRYINDEX` is a macro; `lua_error` is variadic-adjacent).
   Add to that shim rather than reaching into the Lua sources. Treat everything else under `Vendor/` as upstream — do not

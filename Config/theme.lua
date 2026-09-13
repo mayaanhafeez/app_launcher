@@ -16,6 +16,18 @@ return {
   -- ghostty, btop .theme. They are all flat key -> hex, so one reader takes them all.
   palette = "auto",
 
+  -- Extra places to look for a named scheme, searched after ~/.config/kitsune/themes
+  -- and before the built-in locations above -- so this reaches a collection the list
+  -- has never heard of without giving up themes/<name> as the override slot.
+  -- An entry is either a directory, tried with each extension above, or a template
+  -- containing {name} for a collection that shapes the path some other way (Omarchy
+  -- makes the theme a *directory*, so a directory entry cannot reach it).
+  -- palette_paths = {
+  --   "~/.config/wezterm/colors",                 -- <name>.{toml,yaml,yml,conf,theme}
+  --   "~/.config/alacritty/themes/{name}.toml",   -- exactly this path
+  --   "~/dev/schemes/{name}/colors.toml",         -- the Omarchy shape
+  -- },
+
   -- Palette overrides. Uncomment to pin a role regardless of the palette; with all
   -- of them commented out the palette above is fully in charge.
   -- bg = "17191f",
