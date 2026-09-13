@@ -114,7 +114,7 @@ vocabulary. Both `config.lua` and `theme.lua` reload automatically on save.
 ```sh
 mkdir -p ~/.config/kitsune
 cp Config/config.lua Config/theme.lua ~/.config/kitsune/
-cp -r Config/plugins ~/.config/kitsune/
+cp -r Config/plugins Config/colour_schemes ~/.config/kitsune/
 ```
 
 - `~/.config/kitsune/config.lua` — the menu tree, actions, providers, settings. Rebuilds
@@ -124,6 +124,11 @@ cp -r Config/plugins ~/.config/kitsune/
 - `~/.config/kitsune/plugins/`, `~/.config/kitsune/lua/` — anywhere else you `require`
   from `config.lua`, the way a Neovim config splits across files. Saving any `.lua` file
   below `~/.config/kitsune` reloads, so a split config hot-reloads like a single one.
+- `~/.config/kitsune/colour_schemes/` — a palette for every theme the Colour Scheme menu
+  offers, so those names resolve without kitty, ghostty, btop or Omarchy installed. They
+  are consulted **last**: where one of those tools has the theme, its file still wins and
+  the panel retints along with the rest of the system. To override one, put a file of the
+  same name in `~/.config/kitsune/themes/`, which is searched first.
 
 A missing `config.lua` falls back to a small built-in menu (Apps / System / Tools), so
 Kitsune is usable before you've written anything.

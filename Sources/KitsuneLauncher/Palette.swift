@@ -73,6 +73,13 @@ struct Palette: Sendable {
             candidates.append(home.appendingPathComponent(".config/kitty/themes/\(base).conf"))
             candidates.append(home.appendingPathComponent(".config/ghostty/themes/\(base)"))
             candidates.append(home.appendingPathComponent(".config/btop/themes/\(base).theme"))
+            // Last, so a machine that has any of the above keeps following it exactly and
+            // the launcher retints with the rest of the system rather than overriding it.
+            // These only answer when nothing else does, which is what makes a name in the
+            // Colour Scheme menu resolve on a machine with none of those tools installed.
+            for ext in ["toml", "yaml", "yml", "conf", "theme"] {
+                candidates.append(configDirectory.appendingPathComponent("colour_schemes/\(base).\(ext)"))
+            }
         }
         for url in candidates where FileManager.default.fileExists(atPath: url.path) {
             if let palette = load(contentsOf: url) { return palette }

@@ -1,0 +1,12 @@
+# Vanta Black — shipped with KitsuneLauncher.
+# Source: btop themes/vanta_black.theme, mapped main_bg/main_fg/
+# hi_fg/selected_bg/inactive_fg onto the roles the panel reads.
+
+mode = "dark"
+
+background = "#000000"
+lighter_background = "#1a1a1a"
+foreground = "#ffffff"
+accent = "#8d8d8d"
+selection = "#1a1a1a"
+muted = "#505050"

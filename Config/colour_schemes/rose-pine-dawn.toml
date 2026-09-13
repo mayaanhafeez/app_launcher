@@ -1,0 +1,35 @@
+# Rose Pine Dawn — shipped with KitsuneLauncher.
+# Source: the upstream Rosé Pine palette, whose role names map onto these directly
+# (base, surface, muted, subtle, text, and the named hues).
+#
+# Not converted from btop like its neighbours: btop's copies of the three Rosé Pine
+# variants set hi_fg to the text colour, so an accent taken from there would be
+# invisible against the label it tints. The accent below is the hue set-theme already
+# picks for this variant (foam).
+#
+# Note that Omarchy ships its `rose-pine` as the light Dawn variant. This file is the
+# dark original, and Dawn keeps its own name.
+
+mode = "light"
+
+accent = "#56949f"
+selection = "#dfdad9"
+muted = "#9893a5"
+
+background = "#faf4ed"
+lighter_background = "#fffaf3"
+dark_background = "#f2e9e1"
+darker_background = "#f4ede8"
+
+foreground = "#575279"
+dark_foreground = "#9893a5"
+light_foreground = "#797593"
+bright_foreground = "#575279"
+
+red = "#b4637a"
+yellow = "#ea9d34"
+orange = "#d7827e"
+green = "#286983"
+cyan = "#d7827e"
+blue = "#56949f"
+magenta = "#907aa9"

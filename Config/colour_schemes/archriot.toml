@@ -1,0 +1,12 @@
+# Archriot — shipped with KitsuneLauncher.
+# Source: btop themes/archriot.theme, mapped main_bg/main_fg/
+# hi_fg/selected_bg/inactive_fg onto the roles the panel reads.
+
+mode = "dark"
+
+background = "#1a1b26"
+lighter_background = "#4a2b7a"
+foreground = "#ffffff"
+accent = "#9d7bd8"
+selection = "#4a2b7a"
+muted = "#686868"
