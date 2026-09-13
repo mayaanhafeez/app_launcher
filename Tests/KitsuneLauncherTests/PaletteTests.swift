@@ -238,3 +238,86 @@ private func writeScheme(_ url: URL, background: String) throws {
     #expect(runtime.paletteName == "kitsune-test-scheme")
     #expect(hex(theme.bg) == "0a0b0c")
 }
+
+// MARK: - Shipped colour schemes
+
+private func shippedSchemes() throws -> [(name: String, palette: Palette)] {
+    let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        .deletingLastPathComponent().deletingLastPathComponent()
+    let directory = repo.appendingPathComponent("Config/colour_schemes")
+    let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        .filter { $0.pathExtension == "toml" }.sorted { $0.path < $1.path }
+    return try files.map { (name: $0.deletingPathExtension().lastPathComponent, palette: try #require(Palette.load(contentsOf: $0))) }
+}
+
+// A shipped scheme that leaves a role unresolved falls back to that token's built-in
+// value, so half the panel would be the theme and half would not — and silently.
+@Test func everyShippedSchemeFillsEveryRole() throws {
+    let schemes = try shippedSchemes()
+    #expect(schemes.count == 21)
+    for (name, palette) in schemes {
+        #expect(palette.background != nil, "\(name) has no background")
+        #expect(palette.foreground != nil, "\(name) has no foreground")
+        #expect(palette.surface != nil, "\(name) has no surface")
+        #expect(palette.muted != nil, "\(name) has no muted")
+        #expect(palette.accent != nil, "\(name) has no accent")
+        #expect(palette.selection != nil, "\(name) has no selection")
+        #expect(palette.border != nil, "\(name) has no border")
+    }
+}
+
+// btop's `hi_fg` is a highlight *foreground* and some themes set it to the text colour.
+// Converted blindly that leaves an accent invisible against the label it tints, which is
+// how the three Rosé Pine variants came to be mapped from upstream instead.
+@Test func noShippedSchemeUsesItsTextColourAsTheAccent() throws {
+    for (name, palette) in try shippedSchemes() {
+        #expect(hex(palette.accent) != hex(palette.foreground), "\(name)'s accent is its foreground")
+        #expect(hex(palette.background) != hex(palette.foreground), "\(name) is unreadable")
+    }
+}
+
+// The menu offers a name; the schemes answer it. A menu row with no scheme behind it is
+// one that silently does not retint on a machine without the other tools installed.
+// Only that direction is checked: a scheme can land before the row that offers it, and
+// `set-theme` knows names this menu has not caught up with.
+@Test func shippedSchemesCoverEveryThemeTheMenuOffers() throws {
+    let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        .deletingLastPathComponent().deletingLastPathComponent()
+    let source = try String(contentsOf: repo.appendingPathComponent("Config/plugins/themes.lua"), encoding: .utf8)
+    // Just the `local themes = { ... }` table: the comments above it name other things.
+    let table = try #require(source.firstMatch(of: /local themes = \{([^}]*)\}/)).1
+    let listed = Set(table.matches(of: /"([a-z0-9-]+)"/).map { String($0.1) })
+    #expect(listed.count >= 20, "the theme table did not parse")
+    #expect(listed.subtracting(Set(try shippedSchemes().map(\.name))).isEmpty,
+            "offered by the menu with no shipped scheme")
+}
+
+// The Dawn confusion this set exists to end: Omarchy ships its `rose-pine` light, so the
+// shipped one must be the dark original and Dawn must keep its own name.
+@Test func shippedRosePineIsDarkAndDawnIsSeparate() throws {
+    let schemes = Dictionary(uniqueKeysWithValues: try shippedSchemes().map { ($0.name, $0.palette) })
+    #expect(hex(schemes["rose-pine"]?.background) == "191724")
+    #expect(hex(schemes["rose-pine-moon"]?.background) == "232136")
+    #expect(hex(schemes["rose-pine-dawn"]?.background) == "faf4ed")
+}
+
+// Shipped schemes live under the config directory, so `resolve` has to reach them there
+// — and yield to every other location, or the panel would stop following a theme the
+// rest of the system reads from its own files. The name is one no machine can already
+// have: a real one would let the developer's own ~/omarchy answer first.
+@Test func shippedSchemesResolveByNameButYieldToTheOverrideSlot() throws {
+    let config = kitsuneTemporaryDirectory("kitsune-palette")
+    defer { kitsuneRemove(config) }
+    func write(_ relative: String, _ background: String) throws {
+        let url = config.appendingPathComponent(relative)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "background = #\(background)\nforeground = #ffffff".write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    try write("colour_schemes/kitsune-test-scheme.toml", "010203")
+    #expect(hex(Palette.resolve("kitsune-test-scheme", configDirectory: config)?.background) == "010203")
+
+    // themes/<name> still wins, so overriding a shipped scheme needs no edit to it.
+    try write("themes/kitsune-test-scheme.toml", "040506")
+    #expect(hex(Palette.resolve("kitsune-test-scheme", configDirectory: config)?.background) == "040506")
+}
