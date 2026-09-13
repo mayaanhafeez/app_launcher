@@ -41,35 +41,13 @@ Two executables from one SwiftPM package (`Package.swift`), plus a vendored Lua 
   `colors.toml`, kitty `.conf`, ghostty and btop `.theme` are all flat `key → hex` files
   differing only in separator and key vocabulary, so one tokenizer reads every dialect and
   `role` accessors resolve semantic roles against a priority list of key names. Adding a
-  format means adding key names to those lists, not a parser. **The launcher's own
-  palettes are a fallback, not the source of truth** — a name resolves against whatever
-  the machine already has, and `resolve` stats a fixed candidate list, never a scan: the
-  first file that exists and parses wins. The order is what carries the meaning:
-
-  - `~/.config/kitsune/themes/<name>` is **first**, and that is the override slot —
-    `Config/themes/rose-pine.toml` exists because Omarchy ships its `rose-pine` as the
-    light Dawn variant, so `palette = "auto"` went light while the rest of the system
-    was on dark Rosé Pine.
-  - `palette_paths` from `theme.lua` comes next, so reaching a collection nothing here
-    has heard of does not cost that shadowing. An entry is a directory or a `{name}`
-    template, because the built-in locations are not one shape — ghostty names a bare
-    file, kitty adds an extension, and Omarchy makes the theme the *directory*
-    (`<name>/colors.toml`), which a directory-only list cannot express. It is read in
-    `ThemeRuntime.load` and passed straight to `resolve` rather than carried on `Theme`,
-    which is the appearance surface: this is an input to *finding* the scheme, not a
-    token the panel draws with.
-  - kitty, ghostty, btop and Omarchy follow.
-  - `Config/colour_schemes/` is **last**, deliberately: it holds a palette for every
-    name the Colour Scheme menu offers, so those rows retint on a machine with none of
-    those tools installed, but wherever one of them has the theme its file still wins
-    and the panel retints along with the rest of the system.
-
-  The shipped schemes are conversions, not originals — Omarchy's `colors.toml` where it
-  has the name, otherwise btop's `.theme` mapped onto the roles — and the two things a
-  conversion gets wrong are what the tests pin: btop's `hi_fg` is a highlight
-  *foreground* that several themes set to the text colour, and Omarchy's `kanagawa` sets
-  `accent` to its foreground the same way, either of which leaves the accent invisible
-  against the label it tints.
+  The list is walked **location-major**, with the hyphen/underscore spellings tried only
+  *within* a location: walking the whole list once per spelling instead silently inverts
+  the order whenever a name is spelled the way a later location prefers — btop's theme
+  directory is entirely underscored and `colour_schemes` is hyphenated like the menu, so
+  every shipped scheme beat btop's file for the same theme. `Config/colour_schemes/` is
+  the set shipped for the names the Colour Scheme menu offers, and it is deliberately
+  **last** in that list:
 - **`CLua`** — `Vendor/lua-5.4.8/src` compiled in-tree. `Vendor/lua-5.4.8/src/include/CLua.h` is a hand-written shim
   exposing what Swift can't import from Lua's headers (`LUA_REGISTRYINDEX` is a macro; `lua_error` is variadic-adjacent).
   Add to that shim rather than reaching into the Lua sources. Treat everything else under `Vendor/` as upstream — do not

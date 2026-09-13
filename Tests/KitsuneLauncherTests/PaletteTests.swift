@@ -321,3 +321,31 @@ private func shippedSchemes() throws -> [(name: String, palette: Palette)] {
     try write("themes/kitsune-test-scheme.toml", "040506")
     #expect(hex(Palette.resolve("kitsune-test-scheme", configDirectory: config)?.background) == "040506")
 }
+
+// A hyphenated name must not reach a *later* location before an *earlier* one gets to
+// try the underscored spelling. Walking the whole list per spelling did exactly that:
+// btop's theme directory is entirely underscored and `colour_schemes` is hyphenated like
+// the menu, so all 21 shipped schemes beat btop's file for the same theme — the shipped
+// set silently stopped being a fallback for every name btop spells with underscores.
+@Test func anEarlierLocationWinsEvenWhenItSpellsTheNameTheOtherWay() throws {
+    let config = kitsuneTemporaryDirectory("kitsune-palette")
+    defer { kitsuneRemove(config) }
+    func write(_ relative: String, _ background: String) throws {
+        let url = config.appendingPathComponent(relative)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "background = #\(background)\nforeground = #ffffff".write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    // themes/ is the earlier location and holds only the underscored spelling;
+    // colour_schemes/ is the later one and holds the hyphenated spelling the caller used.
+    try write("themes/kitsune_test_scheme.toml", "aaaaaa")
+    try write("colour_schemes/kitsune-test-scheme.toml", "bbbbbb")
+    #expect(hex(Palette.resolve("kitsune-test-scheme", configDirectory: config)?.background) == "aaaaaa")
+
+    // Only that direction: `resolve` spells a name with underscores as an alternative,
+    // never the reverse, so an underscored query does not reach a hyphenated file. Every
+    // name that arrives here — the menu's rows, ~/.config/theme — is hyphenated.
+    kitsuneRemove(config.appendingPathComponent("themes"))
+    #expect(Palette.resolve("kitsune-test-scheme", configDirectory: config) != nil)
+    #expect(Palette.resolve("kitsune_test_scheme", configDirectory: config) == nil)
+}
