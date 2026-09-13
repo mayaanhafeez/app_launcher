@@ -311,6 +311,16 @@ Both the pointer and that lookup are captured in `captureAnchors()` **once per s
 `resizeToContent` runs on every keystroke, an Accessibility call is cross-process, and re-reading the pointer would let
 the panel crawl after the mouse — or hop displays — while the user types into it.
 
+Holding them for the showing is what makes a **display change** the one event that has to break the rule, so
+`NSApplication.didChangeScreenParametersNotification` is observed: it drops `anchoredTop` and, if the panel is visible,
+re-captures and re-places. Plugging a monitor in moves the global coordinate origin, so a showing anchored just before
+that lands far from its anchor rather than a few pixels out; AppKit has already updated `NSScreen.screens` by the time
+the notification fires, which is what makes re-placing there correct. A hidden panel needs only `anchoredTop` cleared,
+since `show()` re-reads the rest. For the same reason `screenIndex` resolves a point no display contains to the
+**nearest** display rather than the primary one — a monitor unplugged while the pointer was on it strands the pointer
+outside every remaining screen, and anchoring on the primary display there clamps the card into the wrong display's
+coordinates. Empty `screens` still answers 0.
+
 The panel is ordered in with `animationBehavior = .none`. Left at `.default`, AppKit picks a fade for
 a panel, and ramping the alpha of a rounded, shadowed card over ~6 frames makes its outline look like
 it settles by a pixel or two on every open — measurable as the card's edges growing 3-5px across the
