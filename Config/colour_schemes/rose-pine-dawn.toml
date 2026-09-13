@@ -7,8 +7,9 @@
 # invisible against the label it tints. The accent below is the hue set-theme already
 # picks for this variant (foam).
 #
-# Note that Omarchy ships its `rose-pine` as the light Dawn variant. This file is the
-# dark original, and Dawn keeps its own name.
+# Note that Omarchy ships its `rose-pine` as the light Dawn variant. That confusion is
+# why Dawn keeps its own name here. Like every file in this directory this one is a
+# fallback: btop's own rose_pine_dawn.theme is consulted first and wins where it exists.
 
 mode = "light"
 
