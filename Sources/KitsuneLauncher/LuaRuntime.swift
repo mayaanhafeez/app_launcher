@@ -853,15 +853,46 @@ final class ThemeRuntime: @unchecked Sendable {
     private(set) var paletteName = ""
 
     func load(file: URL) -> Theme {
+        loadSet(file: file).global
+    }
+
+    func loadSet(file: URL) -> ThemeSet {
         paletteName = ""
-        guard FileManager.default.fileExists(atPath: file.path), let state = luaL_newstate() else { return Theme() }
+        guard FileManager.default.fileExists(atPath: file.path), let state = luaL_newstate() else { return ThemeSet() }
         defer { lua_close(state) }
         luaL_openlibs(state)
         for global in ["io", "os", "package", "debug"] { lua_pushnil(state); lua_setglobal(state, global) }
         guard luaL_loadfilex(state, file.path, nil) == LUA_OK,
               withBudget(state, { lua_pcallk(state, 0, 1, 0, 0, nil) }) == LUA_OK,
-              lua_type(state, -1) == LUA_TTABLE else { return Theme() }
-        var theme = Theme()
+              lua_type(state, -1) == LUA_TTABLE else { return ThemeSet() }
+        let directory = file.deletingLastPathComponent()
+        let global = decodeTheme(state, base: Theme(), configDirectory: directory)
+        var set = ThemeSet(global: global.theme, paletteName: global.paletteName)
+        lua_getfield(state, -1, "screens")
+        if lua_type(state, -1) == LUA_TTABLE {
+            lua_pushnil(state)
+            while lua_next(state, -2) != 0 {
+                if let key = luaString(state, -2), lua_type(state, -1) == LUA_TTABLE {
+                    let decoded = decodeTheme(state, base: global.theme, inheritedPaletteName: global.paletteName,
+                                              configDirectory: directory)
+                    set.screens.append(ScreenTheme(key: key, theme: decoded.theme, paletteName: decoded.paletteName))
+                }
+                lua_settop(state, -2)
+            }
+        }
+        lua_settop(state, -2)
+        paletteName = set.paletteName
+        return set
+    }
+
+    private func decodeTheme(
+        _ state: OpaquePointer,
+        base: Theme,
+        inheritedPaletteName: String = "",
+        configDirectory: URL
+    ) -> (theme: Theme, paletteName: String) {
+        var theme = base
+        var resolvedPaletteName = inheritedPaletteName
         func string(_ key: String) -> String? { lua_getfield(state, -1, key); defer { lua_settop(state, -2) }; return luaString(state, -1) }
         // The palette seeds the colour roles; explicit keys below still override it.
         // `palette_paths` is read here rather than carried on `Theme`, which is the
@@ -870,10 +901,10 @@ final class ThemeRuntime: @unchecked Sendable {
         let searchPaths = LuaRuntime.stringList(state, field: "palette_paths") ?? []
         if let reference = string("palette"), !reference.isEmpty,
            let palette = Palette.resolve(reference,
-                                         configDirectory: file.deletingLastPathComponent(),
+                                         configDirectory: configDirectory,
                                          searchPaths: searchPaths) {
             theme.apply(palette: palette)
-            paletteName = palette.name
+            resolvedPaletteName = palette.name
         }
         func number(_ key: String) -> Double? { lua_getfield(state, -1, key); defer { lua_settop(state, -2) }; return lua_type(state, -1) == LUA_TNUMBER ? lua_tonumberx(state, -1, nil) : nil }
         // Parsed by `Palette.color(from:)`, the same lenient reader the scheme files
@@ -939,6 +970,6 @@ final class ThemeRuntime: @unchecked Sendable {
         if let value = string("detail_mode"), ["search", "always", "never"].contains(value) { theme.detailMode = value }
         if let value = string("label_weight"), let weight = Theme.weight(named: value) { theme.labelWeight = weight }
         if let value = string("detail_weight"), let weight = Theme.weight(named: value) { theme.detailWeight = weight }
-        return theme
+        return (theme, resolvedPaletteName)
     }
 }
