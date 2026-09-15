@@ -55,6 +55,7 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
     /// The top edge this showing was anchored at, held so later resizes grow the card
     /// downwards instead of re-anchoring it. Nil until the showing's first resize.
     private var anchoredTop: CGFloat?
+    private var themes = ThemeSet()
     private var theme = Theme()
     private var title = "Go"
     private let rowIdentifier = NSUserInterfaceItemIdentifier("kitsune-row")
@@ -164,6 +165,8 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
     func show(route: String = "root") {
         guard let panel = window else { return }
         captureAnchors()
+        resolveTheme()
+        captureFocusedWindowIfNeeded()
         input.stringValue = ""
         mode = .normal
         refreshModeIndicator()
@@ -286,6 +289,16 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
     }
 
     func apply(theme: Theme) {
+        themes = ThemeSet(global: theme)
+        applyResolved(theme)
+    }
+
+    func apply(themes: ThemeSet) {
+        self.themes = themes
+        resolveTheme()
+    }
+
+    private func applyResolved(_ theme: Theme) {
         self.theme = theme
         blur.material = theme.blurMaterial
         blur.isHidden = !theme.showsBlur
@@ -349,8 +362,24 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
     private func captureAnchors() {
         anchoredTop = nil
         anchorPointer = NSEvent.mouseLocation
+        anchorWindow = nil
+        captureFocusedWindowIfNeeded()
+    }
+
+    private func captureFocusedWindowIfNeeded() {
         let needsWindow = theme.position == .activeWindow || theme.screen == .active
-        anchorWindow = needsWindow ? FocusedWindow.frame() : nil
+        if needsWindow, anchorWindow == nil { anchorWindow = FocusedWindow.frame() }
+    }
+
+    private func resolveTheme() {
+        let screens = NSScreen.screens
+        let index = PanelPlacement.screenIndex(themes.global.screen, screens: screens.map(\.frame),
+                                               pointer: anchorPointer, focusedWindow: anchorWindow)
+        guard screens.indices.contains(index) else { return applyResolved(themes.global) }
+        let screen = screens[index]
+        let number = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.stringValue
+        let resolved = themes.resolved(screenNumber: number, localizedName: screen.localizedName, isMain: index == 0)
+        applyResolved(resolved.theme)
     }
 
     /// The card is content-sized like the omarchy menu: it shrinks to the rows it
