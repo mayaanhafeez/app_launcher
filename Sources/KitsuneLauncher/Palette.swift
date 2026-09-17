@@ -43,6 +43,10 @@ struct Palette: Sendable {
         return Palette(name: name, values: values)
     }
 
+    /// The extensions a bare name is tried with in a directory holding one file per
+    /// theme. The empty one is last and covers ghostty, whose themes carry none.
+    static let extensions = ["toml", "yaml", "yml", "conf", "theme", ""]
+
     /// Resolves a `palette = ...` value: an explicit path, or a bare name looked up
     /// across the scheme directories that exist on this machine. `auto` follows
     /// `~/.config/theme`, so `set-theme` retints the launcher along with everything else.
@@ -62,17 +66,36 @@ struct Palette: Sendable {
             return load(contentsOf: URL(fileURLWithPath: (name as NSString).expandingTildeInPath))
         }
 
-        let underscored = name.replacingOccurrences(of: "-", with: "_")
+        // Location-major, and spelling only *within* a location. The other way round —
+        // the whole list walked for the hyphenated name, then again for the underscored
+        // one — quietly inverts this order whenever a name is spelled the way a later
+        // location prefers. That is not hypothetical: btop's theme directory is entirely
+        // underscored and `colour_schemes` is hyphenated like the menu, so every shipped
+        // scheme beat btop's file for the same theme, which is exactly backwards.
+        let spellings = [name, name.replacingOccurrences(of: "-", with: "_")]
         var candidates: [URL] = []
-        for base in [name, underscored] {
-            for ext in ["toml", "yaml", "yml", "conf", "theme", ""] {
-                let filename = ext.isEmpty ? base : "\(base).\(ext)"
-                candidates.append(configDirectory.appendingPathComponent("themes/\(filename)"))
+        func inEverySpelling(_ candidate: (String) -> [URL]) {
+            for base in spellings { candidates += candidate(base) }
+        }
+
+        // The override slot: shadows a scheme any of the below ships under the same name.
+        inEverySpelling { base in
+            Self.extensions.map { ext in
+                configDirectory.appendingPathComponent("themes/\(ext.isEmpty ? base : "\(base).\(ext)")")
             }
-            candidates.append(home.appendingPathComponent("omarchy/themes/\(base)/colors.toml"))
-            candidates.append(home.appendingPathComponent(".config/kitty/themes/\(base).conf"))
-            candidates.append(home.appendingPathComponent(".config/ghostty/themes/\(base)"))
-            candidates.append(home.appendingPathComponent(".config/btop/themes/\(base).theme"))
+        }
+        inEverySpelling { [home.appendingPathComponent("omarchy/themes/\($0)/colors.toml")] }
+        inEverySpelling { [home.appendingPathComponent(".config/kitty/themes/\($0).conf")] }
+        inEverySpelling { [home.appendingPathComponent(".config/ghostty/themes/\($0)")] }
+        inEverySpelling { [home.appendingPathComponent(".config/btop/themes/\($0).theme")] }
+        // Last, so a machine that has any of the above keeps following it exactly and the
+        // launcher retints with the rest of the system rather than overriding it. These
+        // only answer when nothing else does, which is what makes a name in the Colour
+        // Scheme menu resolve on a machine with none of those tools installed.
+        inEverySpelling { base in
+            Self.extensions.filter { !$0.isEmpty }.map {
+                configDirectory.appendingPathComponent("colour_schemes/\(base).\($0)")
+            }
         }
         for url in candidates where FileManager.default.fileExists(atPath: url.path) {
             if let palette = load(contentsOf: url) { return palette }
