@@ -1,0 +1,12 @@
+# Drive — shipped with KitsuneLauncher.
+# Source: btop themes/drive.theme, mapped main_bg/main_fg/
+# hi_fg/selected_bg/inactive_fg onto the roles the panel reads.
+
+mode = "dark"
+
+background = "#10190f"
+lighter_background = "#283027"
+foreground = "#cdd1b4"
+accent = "#8dbc94"
+selection = "#283027"
+muted = "#616560"

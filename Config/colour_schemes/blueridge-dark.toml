@@ -1,0 +1,12 @@
+# Blueridge Dark — shipped with KitsuneLauncher.
+# Source: btop themes/blueridge_dark.theme, mapped main_bg/main_fg/
+# hi_fg/selected_bg/inactive_fg onto the roles the panel reads.
+
+mode = "dark"
+
+background = "#1c2128"
+lighter_background = "#4a5568"
+foreground = "#e8e6e3"
+accent = "#f4e4bc"
+selection = "#4a5568"
+muted = "#4a5568"

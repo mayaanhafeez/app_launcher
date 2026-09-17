@@ -1,0 +1,12 @@
+# Dark Xp — shipped with KitsuneLauncher.
+# Source: btop themes/dark_xp.theme, mapped main_bg/main_fg/
+# hi_fg/selected_bg/inactive_fg onto the roles the panel reads.
+
+mode = "dark"
+
+background = "#010A13"
+lighter_background = "#747b82"
+foreground = "#a7b0bb"
+accent = "#2E5995"
+selection = "#747b82"
+muted = "#747b82"

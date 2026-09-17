@@ -1,0 +1,12 @@
+# Andromeda — shipped with KitsuneLauncher.
+# Source: btop themes/andromeda.theme, mapped main_bg/main_fg/
+# hi_fg/selected_bg/inactive_fg onto the roles the panel reads.
+
+mode = "dark"
+
+background = "#23262e"
+lighter_background = "#2b2f38"
+foreground = "#e5e5e5"
+accent = "#00e8c6"
+selection = "#2b2f38"
+muted = "#666666"
