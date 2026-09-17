@@ -19,6 +19,9 @@ return {
   --   "~/path/to/scheme.yaml"   an explicit file
   -- Formats: Base16 YAML (base00-base0F), Omarchy colors.toml, kitty .conf,
   -- ghostty, btop .theme. They are all flat key -> hex, so one reader takes them all.
+  -- Because ~/.config/kitsune/themes/ is searched first, dropping a file there
+  -- shadows a scheme another tool ships under the same name -- which is what
+  -- themes/rose-pine.toml does, Omarchy's `rose-pine` being the light Dawn variant.
   palette = "auto",
 
   -- Palette overrides. Uncomment to pin a role regardless of the palette; with all

@@ -57,6 +57,12 @@ Two executables from one SwiftPM package (`Package.swift`), plus a vendored Lua 
   what the tests pin: btop's `hi_fg` is a highlight *foreground* that several themes set
   to the text colour, and Omarchy's `kanagawa` sets `accent` to its foreground the same
   way, either of which leaves the accent invisible against the label it tints.
+  format means adding key names to those lists, not a parser. **The launcher ships no
+  palettes of its own** — a name resolves against whatever the machine already has, and
+  `resolve` searches `~/.config/kitsune/themes/` *before* the other tools' directories.
+  That ordering is the override slot: `Config/themes/rose-pine.toml` exists because
+  Omarchy ships its `rose-pine` as the light Dawn variant, so `palette = "auto"` went
+  light while the rest of the system was on dark Rosé Pine.
 - **`CLua`** — `Vendor/lua-5.4.8/src` compiled in-tree. `Vendor/lua-5.4.8/src/include/CLua.h` is a hand-written shim
   exposing what Swift can't import from Lua's headers (`LUA_REGISTRYINDEX` is a macro; `lua_error` is variadic-adjacent).
   Add to that shim rather than reaching into the Lua sources. Treat everything else under `Vendor/` as upstream — do not
