@@ -5,8 +5,8 @@
 local themes = {
   "andromeda", "archriot", "blueridge-dark", "catppuccin-mocha", "dark-xp", "drive",
   "hinterlands", "kanagawa", "matte-black", "nord", "osaka-jade", "retro-82",
-  "ristretto", "rose-pine", "rose-pine-moon", "tokyo-night", "tokyo-night-storm",
-  "tomorrow-night-burns", "vanta-black",
+  "ristretto", "rose-pine", "rose-pine-dawn", "rose-pine-moon", "tokyo-night",
+  "tokyo-night-storm", "tomorrow-night-burns", "vanta-black",
 }
 
 local function pretty(name)

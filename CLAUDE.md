@@ -41,7 +41,12 @@ Two executables from one SwiftPM package (`Package.swift`), plus a vendored Lua 
   `colors.toml`, kitty `.conf`, ghostty and btop `.theme` are all flat `key → hex` files
   differing only in separator and key vocabulary, so one tokenizer reads every dialect and
   `role` accessors resolve semantic roles against a priority list of key names. Adding a
-  format means adding key names to those lists, not a parser.
+  format means adding key names to those lists, not a parser. **The launcher ships no
+  palettes of its own** — a name resolves against whatever the machine already has, and
+  `resolve` searches `~/.config/kitsune/themes/` *before* the other tools' directories.
+  That ordering is the override slot: `Config/themes/rose-pine.toml` exists because
+  Omarchy ships its `rose-pine` as the light Dawn variant, so `palette = "auto"` went
+  light while the rest of the system was on dark Rosé Pine.
 - **`CLua`** — `Vendor/lua-5.4.8/src` compiled in-tree. `Vendor/lua-5.4.8/src/include/CLua.h` is a hand-written shim
   exposing what Swift can't import from Lua's headers (`LUA_REGISTRYINDEX` is a macro; `lua_error` is variadic-adjacent).
   Add to that shim rather than reaching into the Lua sources. Treat everything else under `Vendor/` as upstream — do not
