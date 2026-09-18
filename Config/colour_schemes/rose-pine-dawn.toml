@@ -8,14 +8,16 @@
 # picks for this variant (foam).
 #
 # Note that Omarchy ships its `rose-pine` as the light Dawn variant. That confusion is
-# why Dawn keeps its own name here. Like every file in this directory this one is a
-# fallback: btop's own rose_pine_dawn.theme is consulted first and wins where it exists.
+# why Dawn keeps its own name here. Like every file in this directory this one answers
+# last: a file of the same name in ~/.config/kitsune/themes, or a collection named in
+# palette_paths, shadows it.
 
 mode = "light"
 
 accent = "#56949f"
 selection = "#dfdad9"
 muted = "#9893a5"
+border = "#56949f"  # foam, matching set-theme's BORDERS_COLOR
 
 background = "#faf4ed"
 lighter_background = "#fffaf3"

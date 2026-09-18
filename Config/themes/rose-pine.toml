@@ -3,11 +3,11 @@
 # Omarchy ships its `rose-pine` theme as the *light* Dawn variant, so with
 # `palette = "auto"` and `~/.config/theme` holding `rose-pine` the panel came up
 # light while kitty, ghostty and nvim were all on dark Rosé Pine. Palette.resolve
-# checks `~/.config/kitsune/themes/<name>` before `~/omarchy/themes/<name>`, so
-# this file shadows that one by name alone. Delete it to go back to Omarchy's.
+# no longer reads ~/omarchy at all unless a config names it in `palette_paths` —
+# and when one does, `themes/<name>` is still searched first, so this file keeps
+# shadowing it by name alone. Delete it to take whatever that collection has.
 #
-# The light variant is still reachable as `rose-pine-dawn`, which resolves
-# through ~/.config/btop/themes/rose_pine_dawn.theme.
+# The light variant keeps its own name: `rose-pine-dawn`, in colour_schemes/.
 
 mode = "dark"
 

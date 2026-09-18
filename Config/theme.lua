@@ -9,23 +9,24 @@ return {
   --   "auto"            follow ~/.config/theme (so `set-theme` retints this too)
   --   "kanagawa"        a name, searched in this order:
   --                       ~/.config/kitsune/themes/<name>.{toml,yaml,yml,conf,theme}
-  --                       ~/omarchy/themes/<name>/colors.toml
-  --                       ~/.config/{kitty,ghostty,btop}/themes/<name>
+  --                       each palette_paths entry below, in the order listed
   --                       ~/.config/kitsune/colour_schemes/<name>.{toml,yaml,...}
-  -- The last of those is the set shipped with the launcher, and it comes last on
-  -- purpose: where one of the tools above has the theme, that file wins and the panel
-  -- retints with the rest of the system. The shipped copies answer when nothing else
-  -- does, so every name in the Colour Scheme menu resolves on a bare machine.
+  -- Nothing outside those is searched. The last is the set shipped with the launcher,
+  -- so every name in the Colour Scheme menu resolves on a bare machine; it comes last
+  -- so a file you put in themes/ shadows it without the shipped one being edited.
+  -- A scheme another tool already has (~/omarchy, ~/.config/kitty, ...) is reached by
+  -- naming that directory in palette_paths -- which keeps the files under
+  -- ~/.config/kitsune the ones in charge rather than whichever tool happens to be
+  -- installed.
   --   "~/path/to/scheme.yaml"   an explicit file
   -- Formats: Base16 YAML (base00-base0F), Omarchy colors.toml, kitty .conf,
   -- ghostty, btop .theme. They are all flat key -> hex, so one reader takes them all.
-  -- Because ~/.config/kitsune/themes/ is searched first, dropping a file there
-  -- shadows a scheme another tool ships under the same name -- which is what
-  -- themes/rose-pine.toml does, Omarchy's `rose-pine` being the light Dawn variant.
+  -- The roles read are background/foreground/accent/selection/muted/surface, plus
+  -- `border` -- no dialect names a border, so a scheme file can set that key itself.
   palette = "auto",
 
   -- Extra places to look for a named scheme, searched after ~/.config/kitsune/themes
-  -- and before the built-in locations above -- so this reaches a collection the list
+  -- and before the shipped colour_schemes/ -- so this reaches a collection the launcher
   -- has never heard of without giving up themes/<name> as the override slot.
   -- An entry is either a directory, tried with each extension above, or a template
   -- containing {name} for a collection that shapes the path some other way (Omarchy

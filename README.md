@@ -125,10 +125,11 @@ cp -r Config/plugins Config/colour_schemes ~/.config/kitsune/
   from `config.lua`, the way a Neovim config splits across files. Saving any `.lua` file
   below `~/.config/kitsune` reloads, so a split config hot-reloads like a single one.
 - `~/.config/kitsune/colour_schemes/` — a palette for every theme the Colour Scheme menu
-  offers, so those names resolve without kitty, ghostty, btop or Omarchy installed. They
-  are consulted **last**: where one of those tools has the theme, its file still wins and
-  the panel retints along with the rest of the system. To override one, put a file of the
-  same name in `~/.config/kitsune/themes/`, which is searched first.
+  offers, so those names resolve on a bare machine. A scheme name is looked up **only**
+  here, in `~/.config/kitsune/themes/` and in the `palette_paths` your `theme.lua` lists;
+  nothing under `~/omarchy` or `~/.config/{kitty,ghostty,btop}` is read unless you name it
+  in `palette_paths`. To override a shipped scheme, put a file of the same name in
+  `~/.config/kitsune/themes/`, which is searched first.
 
 A missing `config.lua` falls back to a small built-in menu (Apps / System / Tools), so
 Kitsune is usable before you've written anything.

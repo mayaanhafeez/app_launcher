@@ -1,11 +1,12 @@
 # Ristretto — shipped with KitsuneLauncher.
-# Source: Omarchy's themes/ristretto/colors.toml, unchanged.
+# Source: Omarchy's themes/ristretto/colors.toml, unchanged but for the `border` below.
 
 mode = "dark"
 
 accent = "#f38d70"
 selection = "#403e41"
 muted = "#72696a"
+border = "#f38d70"  # matching set-theme's BORDERS_COLOR
 
 background = "#2c2525"
 dark_background = "#211b1b"

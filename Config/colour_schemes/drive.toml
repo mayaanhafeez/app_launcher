@@ -10,3 +10,4 @@ foreground = "#cdd1b4"
 accent = "#8dbc94"
 selection = "#283027"
 muted = "#616560"
+border = "#8dbc94"  # sage (the palette accent), matching set-theme's BORDERS_COLOR

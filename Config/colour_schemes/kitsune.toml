@@ -10,3 +10,4 @@ foreground = "#03000b"
 accent = "#3f539e"
 selection = "#f6c8d6"
 muted = "#6c6567"
+border = "#3f539e"  # indigo accent, matching set-theme's BORDERS_COLOR
