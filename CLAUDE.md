@@ -41,13 +41,50 @@ Two executables from one SwiftPM package (`Package.swift`), plus a vendored Lua 
   `colors.toml`, kitty `.conf`, ghostty and btop `.theme` are all flat `key → hex` files
   differing only in separator and key vocabulary, so one tokenizer reads every dialect and
   `role` accessors resolve semantic roles against a priority list of key names. Adding a
+<<<<<<< HEAD
+=======
+  format means adding key names to those lists, not a parser. `border` is the one role no
+  dialect names, so its list leads with the literal key `border`: a scheme file can pin the
+  border outright, and a file that never heard of the key still derives one from
+  `lighter_background`. `resolve` stats a fixed
+  candidate list — never a scan — and takes the first file that exists and parses.
+>>>>>>> feat/palette-config-only-search
   The list is walked **location-major**, with the hyphen/underscore spellings tried only
   *within* a location: walking the whole list once per spelling instead silently inverts
-  the order whenever a name is spelled the way a later location prefers — btop's theme
-  directory is entirely underscored and `colour_schemes` is hyphenated like the menu, so
-  every shipped scheme beat btop's file for the same theme. `Config/colour_schemes/` is
+  the order whenever a name is spelled the way a later location prefers — `colour_schemes`
+  is hyphenated like the menu, so an underscored override in `themes/` would lose to the
+  very scheme it exists to shadow. Every location on the list is **under the config
+  directory**, and that is the whole point of it: `resolve` also walked `~/omarchy` and
+  `~/.config/{kitty,ghostty,btop}` ahead of the shipped set, which made the config the
+  *least* authoritative place a scheme could live — an edited `colour_schemes/<name>.toml`
+  lost to whichever of those tools shipped the same theme, and was never opened. Those
+  collections are reachable again by being named in `palette_paths`, explicitly and in an
+  order the config chose. `~/.config/kitsune/themes/`
+  is **first**, which is the override slot: `Config/themes/rose-pine.toml` exists because
+  Omarchy ships its `rose-pine` as the light Dawn variant, so `palette = "auto"` went
+  light while the rest of the system was on dark Rosé Pine. `palette_paths` in
+  `theme.lua` extends the list **after** that slot and **before** the shipped set,
+  so a config can reach a collection nothing here has heard of without giving up the
+  shadowing. An entry is a directory or a `{name}` template, because the collections in
+  the wild are not one shape — ghostty names a bare file, kitty adds an extension, and
+  Omarchy makes the theme the *directory* (`<name>/colors.toml`), which a directory-only
+  list cannot express; each entry is its own location, so both spellings are tried before
+  the next entry. It is read in `ThemeRuntime.load` and passed straight to `resolve`
+  rather than carried on `Theme`, which is the appearance surface — this is an input to
+  *finding* the scheme, not a token the panel draws with. `Config/colour_schemes/` is
   the set shipped for the names the Colour Scheme menu offers, and it is deliberately
+<<<<<<< HEAD
   **last** in that list:
+=======
+  **last** in that list: a file in `themes/` or a collection named in `palette_paths`
+  shadows it, so the shipped copies only decide a name nothing the user added can answer
+  — which is also what makes every name in the menu resolve on a bare machine. They are
+  conversions, not originals — Omarchy's `colors.toml` where it has the name, otherwise
+  btop's `.theme` mapped onto the roles — and the two things a conversion gets wrong are
+  what the tests pin: btop's `hi_fg` is a highlight *foreground* that several themes set
+  to the text colour, and Omarchy's `kanagawa` sets `accent` to its foreground the same
+  way, either of which leaves the accent invisible against the label it tints.
+>>>>>>> feat/palette-config-only-search
 - **`CLua`** — `Vendor/lua-5.4.8/src` compiled in-tree. `Vendor/lua-5.4.8/src/include/CLua.h` is a hand-written shim
   exposing what Swift can't import from Lua's headers (`LUA_REGISTRYINDEX` is a macro; `lua_error` is variadic-adjacent).
   Add to that shim rather than reaching into the Lua sources. Treat everything else under `Vendor/` as upstream — do not

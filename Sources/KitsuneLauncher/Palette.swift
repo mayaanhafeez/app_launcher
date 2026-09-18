@@ -29,7 +29,11 @@ struct Palette: Sendable {
     var muted: NSColor? { first(["muted", "dark_foreground", "base03", "inactive_fg", "color8"]) }
     var accent: NSColor? { first(["accent", "base0d", "hi_fg", "blue", "color4", "selection_background"]) }
     var selection: NSColor? { first(["selection", "selection_background", "base02", "selected_bg"]) }
-    var border: NSColor? { first(["lighter_background", "base02", "selection", "selected_bg", "muted", "color8"]) }
+    // `border` is the one role no scheme dialect names, so the rest of the list is the
+    // nearest thing each one carries. It leads anyway: a scheme file that spells the role
+    // out is saying exactly what it wants, and deriving the border from
+    // `lighter_background` instead is how an edited `border = ...` silently did nothing.
+    var border: NSColor? { first(["border", "lighter_background", "base02", "selection", "selected_bg", "muted", "color8"]) }
 
     // MARK: - Loading
 
@@ -57,8 +61,8 @@ struct Palette: Sendable {
     /// An entry is either a **template** containing `{name}` — one candidate, spelled
     /// exactly as written — or a plain **directory**, which is tried with every
     /// extension, as `~/.config/kitsune/themes` is. Both shapes are needed because the
-    /// built-in locations are not one shape: ghostty names a bare file, kitty adds an
-    /// extension, and Omarchy makes the *directory* the theme (`<name>/colors.toml`),
+    /// collections in the wild are not one shape: ghostty names a bare file, kitty adds
+    /// an extension, and Omarchy makes the *directory* the theme (`<name>/colors.toml`),
     /// which no directory-only list can express.
     private static func expand(_ entry: String, named base: String) -> [URL] {
         let trimmed = entry.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -71,13 +75,16 @@ struct Palette: Sendable {
     }
 
     /// Resolves a `palette = ...` value: an explicit path, or a bare name looked up
-    /// across the scheme directories that exist on this machine. `auto` follows
+    /// under the config directory and the `palette_paths` the config adds. `auto` follows
     /// `~/.config/theme`, so `set-theme` retints the launcher along with everything else.
     ///
-    /// `searchPaths` is `palette_paths` from `theme.lua`, and sits between the config
-    /// directory and the built-in locations: a config can reach a scheme collection this
-    /// list has never heard of without giving up the override slot that lets
-    /// `themes/<name>` shadow a tool shipping the same name.
+    /// **Nothing outside those two places is searched.** `resolve` used to also walk
+    /// `~/omarchy`, `~/.config/kitty`, `~/.config/ghostty` and `~/.config/btop` for the
+    /// name, which made the config the *least* authoritative place a scheme could live:
+    /// an edited `~/.config/kitsune/colour_schemes/<name>.toml` lost to whichever of
+    /// those tools happened to ship the same theme, and the file the user was editing was
+    /// never even opened. A collection living elsewhere is still reachable — by naming it
+    /// in `palette_paths`, explicitly and in an order the config chose.
     static func resolve(_ reference: String, configDirectory: URL, searchPaths: [String] = []) -> Palette? {
         let home = FileManager.default.homeDirectoryForCurrentUser
         var name = reference.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -97,27 +104,28 @@ struct Palette: Sendable {
         // Location-major, and spelling only *within* a location. The other way round —
         // the whole list walked for the hyphenated name, then again for the underscored
         // one — quietly inverts this order whenever a name is spelled the way a later
-        // location prefers. That is not hypothetical: btop's theme directory is entirely
-        // underscored and `colour_schemes` is hyphenated like the menu, so every shipped
-        // scheme beat btop's file for the same theme, which is exactly backwards.
+        // location prefers: `colour_schemes` is hyphenated like the menu, so an
+        // underscored override in `themes/` would lose to the very scheme it exists to
+        // shadow.
         let spellings = [name, name.replacingOccurrences(of: "-", with: "_")]
         var candidates: [URL] = []
         func inEverySpelling(_ candidate: (String) -> [URL]) {
             for base in spellings { candidates += candidate(base) }
         }
 
-        // The override slot: shadows a scheme any of the below ships under the same name.
+        // The override slot: shadows a scheme `palette_paths` or the shipped set offers
+        // under the same name.
         inEverySpelling { Self.candidates(in: configDirectory.appendingPathComponent("themes"), named: $0) }
-        // Then the config's own additions, which is why they cost no shadowing.
-        inEverySpelling { base in searchPaths.flatMap { Self.expand($0, named: base) } }
-        inEverySpelling { [home.appendingPathComponent("omarchy/themes/\($0)/colors.toml")] }
-        inEverySpelling { [home.appendingPathComponent(".config/kitty/themes/\($0).conf")] }
-        inEverySpelling { [home.appendingPathComponent(".config/ghostty/themes/\($0)")] }
-        inEverySpelling { [home.appendingPathComponent(".config/btop/themes/\($0).theme")] }
-        // Last, so a machine that has any of the above keeps following it exactly and the
-        // launcher retints with the rest of the system rather than overriding it. These
-        // only answer when nothing else does, which is what makes a name in the Colour
-        // Scheme menu resolve on a machine with none of those tools installed.
+        // `palette_paths`, behind the override slot: a config reaches a collection this
+        // list has never heard of without giving up the slot that lets `themes/<name>`
+        // shadow a scheme offered under the same name. Each entry is its own location, so
+        // both its spellings are tried before the next entry.
+        for entry in searchPaths {
+            inEverySpelling { Self.expand(entry, named: $0) }
+        }
+        // Last, the set shipped with the launcher: it only answers when nothing above
+        // does, which is what makes a name in the Colour Scheme menu resolve on a machine
+        // that has added nothing of its own.
         inEverySpelling { base in
             Self.extensions.filter { !$0.isEmpty }.map {
                 configDirectory.appendingPathComponent("colour_schemes/\(base).\($0)")
