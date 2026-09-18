@@ -642,12 +642,25 @@ would make `palette` inert).
 - `palette = "kanagawa"` — a bare name, searched in this order:
   ```
   ~/.config/kitsune/themes/<name>.{toml,yaml,yml,conf,theme}
-  ~/omarchy/themes/<name>/colors.toml
-  ~/.config/kitty/themes/<name>.conf
-  ~/.config/ghostty/themes/<name>
-  ~/.config/btop/themes/<name>.theme
+  every palette_paths entry, in the order listed
+  ~/.config/kitsune/colour_schemes/<name>.{toml,yaml,yml,conf,theme}
   ```
+  **Nothing outside those is searched.** Your config directory is the whole lookup, so
+  the file you edit is the file that is read; `~/.config/kitsune/themes/<name>` comes
+  first and shadows a shipped scheme of the same name without touching it. A two-word
+  name is tried hyphenated and underscored in each location before moving to the next.
 - `palette = "~/schemes/dracula.yaml"` — an explicit path.
+- `palette_paths` adds directories to the middle of that list — this is how a collection
+  another tool ships is reached:
+  ```lua
+  palette_paths = {
+    "~/omarchy/themes/{name}/colors.toml",   -- a template: exactly this path
+    "~/.config/kitty/themes",                -- a directory: tried with each extension
+  },
+  ```
+  An entry is a directory, tried with every extension above, or a template containing
+  `{name}` for a collection that shapes the path some other way (Omarchy makes the theme
+  a *directory*, which a directory entry cannot reach).
 
 Supported formats — all flat `key → hex`, read by one tokenizer:
 
@@ -658,6 +671,11 @@ Supported formats — all flat `key → hex`, read by one tokenizer:
 | kitty `.conf` | `background  #1e1e2e` | `background`, `foreground`, `selection_background`, `color0`–`color15` |
 | ghostty | `palette = 4=#7aa2f7` | same as kitty, plus indexed `palette` entries |
 | btop `.theme` | `theme[main_bg]="#1e1e2e"` | `main_bg`, `main_fg`, `hi_fg`, `selected_bg`, `inactive_fg` |
+
+A scheme file may also set `border` directly. No dialect names that role — it is
+otherwise derived from whatever each one calls its lighter background — so a
+`border = "#5fcfc9"` line in the scheme is the only way to pin it without moving the
+colour in `theme.lua`.
 
 Hex is read the same way everywhere — in palette scheme files and in the
 explicit `theme.lua` overrides alike: `#rrggbb`, `rrggbb`, `#rgb`, or
