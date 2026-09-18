@@ -1,5 +1,5 @@
 # Catppuccin Mocha — shipped with KitsuneLauncher.
-# Source: Omarchy's themes/catppuccin/colors.toml, unchanged.
+# Source: Omarchy's themes/catppuccin/colors.toml, unchanged but for the `border` below.
 # Omarchy calls this one `catppuccin`; it is the Mocha variant.
 
 mode = "dark"
@@ -7,6 +7,7 @@ mode = "dark"
 accent = "#89b4fa"
 selection = "#45475a"
 muted = "#585b70"
+border = "#89b4fa"  # blue, matching set-theme's BORDERS_COLOR
 
 background = "#1e1e2e"
 dark_background = "#161622"

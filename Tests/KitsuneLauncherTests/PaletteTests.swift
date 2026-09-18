@@ -302,6 +302,23 @@ private func shippedSchemes() throws -> [(name: String, palette: Palette)] {
     }
 }
 
+// Every shipped scheme names its border rather than letting it fall back to
+// `lighter_background`: the value is the one `set-theme` hands JankyBorders for that
+// theme, so the panel's edge matches the window borders around it. A scheme that loses
+// the key still resolves a border, which is exactly why this is checked on the file.
+@Test func everyShippedSchemeNamesItsOwnBorder() throws {
+    let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        .deletingLastPathComponent().deletingLastPathComponent()
+    let directory = repo.appendingPathComponent("Config/colour_schemes")
+    let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        .filter { $0.pathExtension == "toml" }.sorted { $0.path < $1.path }
+    for file in files {
+        let values = Palette.parse(try String(contentsOf: file, encoding: .utf8))
+        let name = file.deletingPathExtension().lastPathComponent
+        #expect(values["border"] != nil, "\(name) does not name a border")
+    }
+}
+
 // btop's `hi_fg` is a highlight *foreground* and some themes set it to the text colour.
 // Converted blindly that leaves an accent invisible against the label it tints, which is
 // how the three Rosé Pine variants came to be mapped from upstream instead.

@@ -1,11 +1,12 @@
 # Matte Black — shipped with KitsuneLauncher.
-# Source: Omarchy's themes/matte-black/colors.toml, unchanged.
+# Source: Omarchy's themes/matte-black/colors.toml, unchanged but for the `border` below.
 
 mode = "dark"
 
 accent = "#e68e0d"
 selection = "#2a2a2a"
 muted = "#333333"
+border = "#e68e0d"  # amber, matching set-theme's BORDERS_COLOR
 
 background = "#121212"
 dark_background = "#0d0d0d"

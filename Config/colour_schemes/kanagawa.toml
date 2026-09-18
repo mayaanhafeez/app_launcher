@@ -8,6 +8,7 @@ mode = "dark"
 accent = "#7e9cd8"  # crystal blue; Omarchy sets accent to the text colour here
 selection = "#363646"
 muted = "#54546D"
+border = "#dcd7ba"  # matching set-theme's BORDERS_COLOR
 
 background = "#1f1f28"
 dark_background = "#17171e"

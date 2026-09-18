@@ -10,3 +10,4 @@ foreground = "#a1b0b8"
 accent = "#fc595f"
 selection = "#252525"
 muted = "#5d6f71"
+border = "#fc595f"  # bright red, matching set-theme's BORDERS_COLOR

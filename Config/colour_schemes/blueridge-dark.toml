@@ -10,3 +10,4 @@ foreground = "#e8e6e3"
 accent = "#f4e4bc"
 selection = "#4a5568"
 muted = "#4a5568"
+border = "#7ec8c8"  # turquoise patina, matching set-theme's BORDERS_COLOR

@@ -1,11 +1,12 @@
 # Tokyo Night — shipped with KitsuneLauncher.
-# Source: Omarchy's themes/tokyo-night/colors.toml, unchanged.
+# Source: Omarchy's themes/tokyo-night/colors.toml, unchanged but for the `border` below.
 
 mode = "dark"
 
 accent = "#7aa2f7"
 selection = "#292e42"
 muted = "#414868"
+border = "#7aa2f7"  # blue, matching set-theme's BORDERS_COLOR
 
 background = "#1a1b26"
 dark_background = "#13141c"
