@@ -675,7 +675,8 @@ Supported formats — all flat `key → hex`, read by one tokenizer:
 A scheme file may also set `border` directly. No dialect names that role — it is
 otherwise derived from whatever each one calls its lighter background — so a
 `border = "#5fcfc9"` line in the scheme is the only way to pin it without moving the
-colour in `theme.lua`.
+colour in `theme.lua`. Every shipped scheme carries one: the colour `set-theme` gives
+JankyBorders for that theme, so the panel's edge matches the window borders around it.
 
 Hex is read the same way everywhere — in palette scheme files and in the
 explicit `theme.lua` overrides alike: `#rrggbb`, `rrggbb`, `#rgb`, or

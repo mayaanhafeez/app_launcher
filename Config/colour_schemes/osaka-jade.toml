@@ -1,11 +1,12 @@
 # Osaka Jade — shipped with KitsuneLauncher.
-# Source: Omarchy's themes/osaka-jade/colors.toml, unchanged.
+# Source: Omarchy's themes/osaka-jade/colors.toml, unchanged but for the `border` below.
 
 mode = "dark"
 
 accent = "#509475"
 selection = "#32473B"
 muted = "#53685B"
+border = "#509475"  # matching set-theme's BORDERS_COLOR
 
 background = "#111c18"
 dark_background = "#0c1512"
