@@ -32,6 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `kitsunectl reload` answers with the outcome of the load *it* asked for. The
     /// load is asynchronous, so the reply waits here for the next outcome.
     private var pendingReloads: [(String?) -> Void] = []
+    private var activeTheme = ThemeSet()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -154,11 +155,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func reloadTheme() {
-        let theme = themeRuntime.load(file: configDirectory.appendingPathComponent("theme.lua"))
-        panel.apply(theme: theme)
+        activeTheme = themeRuntime.loadSet(file: configDirectory.appendingPathComponent("theme.lua"))
+        panel.apply(themes: activeTheme)
         // Icons are flattened at scan time, so the index needs the size the panel is
         // about to draw them at; `apply` no-ops unless it actually changed.
-        appIndex.apply(iconPoints: theme.iconSlot)
+        appIndex.apply(iconPoints: activeTheme.global.iconSlot)
     }
 
     private func reloadChangedFiles() {

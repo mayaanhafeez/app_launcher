@@ -614,6 +614,27 @@ native (AppKit), so this token set really is the whole appearance surface —
 there is no other place in Kitsune a color, spacing value, or font size can come
 from.
 
+### Per-screen overrides
+
+Add a `screens` table to replace any theme tokens on a particular display. Each
+entry inherits the global theme, so unspecified values keep their existing
+defaults. An entry can also select its own `palette`; explicit values in that
+entry are applied after the palette.
+
+```lua
+screens = {
+  main = { palette = "rose-pine", width = 420 },
+  ["123456789"] = { palette = "catppuccin", position = "top", offset_y = -20 },
+  ["Studio Display"] = { spacing_scale = 1.15 },
+}
+```
+
+The preferred key is the display's stable numeric `NSScreenNumber` (shown by
+`system_profiler SPDisplaysDataType`). `main` and the localized display name are
+also accepted. Numeric IDs keep the override attached when displays are reordered;
+if a display is disconnected, its entry is simply unused and the global theme
+continues to apply elsewhere.
+
 ### Colour
 
 ```lua
