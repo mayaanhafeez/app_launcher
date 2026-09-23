@@ -901,7 +901,7 @@ final class ThemeRuntime: @unchecked Sendable {
         let searchPaths = LuaRuntime.stringList(state, field: "palette_paths") ?? []
         if let reference = string("palette"), !reference.isEmpty,
            let palette = Palette.resolve(reference,
-                                         configDirectory: file.deletingLastPathComponent(),
+                                         configDirectory: configDirectory,
                                          searchPaths: searchPaths) {
             theme.apply(palette: palette)
             resolvedPaletteName = palette.name
