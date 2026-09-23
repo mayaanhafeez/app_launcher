@@ -741,6 +741,25 @@ struct Theme: Sendable {
     var detailWeight: NSFont.Weight = .regular
 }
 
+struct ScreenTheme: Sendable {
+    let key: String
+    let theme: Theme
+    let paletteName: String
+}
+
+struct ThemeSet: Sendable {
+    var global = Theme()
+    var paletteName = ""
+    var screens: [ScreenTheme] = []
+
+    func resolved(screenNumber: String?, localizedName: String?, isMain: Bool) -> ScreenTheme {
+        for alias in [screenNumber, localizedName, isMain ? "main" : nil].compactMap({ $0?.lowercased() }) {
+            if let match = screens.last(where: { $0.key.lowercased() == alias }) { return match }
+        }
+        return ScreenTheme(key: "", theme: global, paletteName: paletteName)
+    }
+}
+
 extension Theme {
     func space(_ value: CGFloat) -> CGFloat { value <= 0 ? 0 : max(1, (value * spacingScale).rounded()) }
 

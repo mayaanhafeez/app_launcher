@@ -97,4 +97,13 @@ return {
   label_weight = "medium",
   detail_weight = "regular",
   detail_mode = "search", -- "search" | "always" | "never"
+
+  -- Per-display overrides. Use the stable display ID printed by
+  -- `system_profiler SPDisplaysDataType`, the display name, or "main". Only the
+  -- values present here replace the global values above, and `palette` may select a
+  -- different scheme for this display.
+  -- screens = {
+  --   ["main"] = { palette = "rose-pine", width = 420 },
+  --   ["123456789"] = { palette = "catppuccin", position = "top", offset_y = -20 },
+  -- },
 }
