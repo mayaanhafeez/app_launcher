@@ -349,13 +349,19 @@ the panel crawl after the mouse — or hop displays — while the user types int
 
 Holding them for the showing is what makes a **display change** the one event that has to break the rule, so
 `NSApplication.didChangeScreenParametersNotification` is observed: it drops `anchoredTop` and, if the panel is visible,
-re-captures and re-places. Plugging a monitor in moves the global coordinate origin, so a showing anchored just before
-that lands far from its anchor rather than a few pixels out; AppKit has already updated `NSScreen.screens` by the time
-the notification fires, which is what makes re-placing there correct. A hidden panel needs only `anchoredTop` cleared,
-since `show()` re-reads the rest. For the same reason `screenIndex` resolves a point no display contains to the
+re-captures and re-places after a short debounce. Plugging a monitor in can emit several notifications while the global
+coordinate origin and screen frames settle, so placing immediately can preserve an intermediate frame; the debounce
+waits until that burst stops. A hidden panel needs only `anchoredTop` cleared, since `show()` re-reads the rest. For the
+same reason `screenIndex` resolves a point no display contains to the
 **nearest** display rather than the primary one — a monitor unplugged while the pointer was on it strands the pointer
 outside every remaining screen, and anchoring on the primary display there clamps the card into the wrong display's
 coordinates. Empty `screens` still answers 0.
+
+`show()` schedules the **same** debounce (`schedulePlacement`, the one both callers share) rather than trusting the read
+it has just made: login, wake and a freshly attached display can leave AppKit's *first* screen snapshot transitional and
+then send no notification at all, so there is nothing else to correct it. That keeps re-anchoring to exactly two moments
+— a settled display change, and one beat after a showing — and `hide()` cancels a pending one, or a panel dismissed
+inside that beat would re-place itself after it was gone.
 
 The panel is ordered in with `animationBehavior = .none`. Left at `.default`, AppKit picks a fade for
 a panel, and ramping the alpha of a rounded, shadowed card over ~6 frames makes its outline look like

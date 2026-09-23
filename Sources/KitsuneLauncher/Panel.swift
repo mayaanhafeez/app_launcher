@@ -103,6 +103,10 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
     /// delegate and outlives every other object, so there is nothing to tear down.
     private var keyMonitor: Any?
     private var screenObserver: Any?
+    private var pendingScreenPlacement: DispatchWorkItem?
+    /// Long enough to outlast the notification burst a reconnect emits, short enough that
+    /// a panel opened onto a settled display never shows the intermediate frame.
+    private static let placementSettleDelay: TimeInterval = 0.2
 
     var onQuery: ((String) -> Void)?
     var onActivate: ((DisplayRow) -> Void)?
@@ -141,9 +145,9 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
     /// monitor in moves the global coordinate origin, which is why the symptom was a card
     /// far above its anchor rather than a few pixels out.
     ///
-    /// AppKit has already updated `NSScreen.screens` by the time this fires, so the fix is
-    /// to drop the held anchors and re-place. A visible panel is re-anchored immediately;
-    /// a hidden one only needs `anchoredTop` cleared, since `show()` re-reads the rest.
+    /// A reconnect can emit several notifications while the display geometry is settling,
+    /// so placement is debounced until that burst stops. A hidden panel only needs
+    /// `anchoredTop` cleared, since `show()` re-reads the rest.
     private func observeScreenChanges() {
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
@@ -156,9 +160,12 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
 
     private func screenParametersDidChange() {
         anchoredTop = nil
-        guard window?.isVisible == true else { return }
-        captureAnchors()
-        resizeToContent()
+        guard window?.isVisible == true else {
+            pendingScreenPlacement?.cancel()
+            pendingScreenPlacement = nil
+            return
+        }
+        schedulePlacement()
     }
 
     /// Normal mode has to intercept plain characters, and `performKeyEquivalent` is
@@ -192,6 +199,7 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
 
     func show(route: String = "root") {
         guard let panel = window else { return }
+        pendingScreenPlacement?.cancel()
         captureAnchors()
         resolveTheme()
         captureFocusedWindowIfNeeded()
@@ -201,16 +209,48 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
         updatePrompt()
         resizeToContent()
         panel.orderFrontRegardless()
+        schedulePlacement()
         panel.makeKey()
         panel.makeFirstResponder(input)
     }
 
     func hide() {
+        pendingScreenPlacement?.cancel()
+        pendingScreenPlacement = nil
         input.stringValue = ""
         mode = .normal
         refreshModeIndicator()
         updatePrompt()
         window?.orderOut(nil)
+    }
+
+    /// Re-anchor once the display geometry has settled — the single debounce both
+    /// callers share, since the thing they are waiting out is the same.
+    ///
+    /// A reconnect emits several screen-change notifications while the global origin and
+    /// the screen frames settle, so placing on the first one preserves an intermediate
+    /// frame. Login, wake and a newly attached display can also leave AppKit's *first*
+    /// snapshot transitional without sending another notification afterwards, which is
+    /// why `show()` schedules one too rather than trusting the read it just made.
+    ///
+    /// Re-anchoring is otherwise forbidden while the panel is up — `captureAnchors` runs
+    /// once per showing precisely so the card cannot crawl after the pointer — so this
+    /// stays the narrow exception: it fires once per burst, and the row updates that
+    /// follow keep hanging from the anchor it leaves behind.
+    private func schedulePlacement() {
+        pendingScreenPlacement?.cancel()
+        var placement: DispatchWorkItem!
+        placement = DispatchWorkItem { [weak self] in
+            guard let self, self.window?.isVisible == true else { return }
+            // A newer burst already replaced this one; only the last claim re-places.
+            guard self.pendingScreenPlacement === placement else { return }
+            self.captureAnchors()
+            self.resizeToContent()
+            self.pendingScreenPlacement = nil
+        }
+        pendingScreenPlacement = placement
+        DispatchQueue.main.asyncAfter(deadline: .now() + PanelController.placementSettleDelay,
+                                      execute: placement)
     }
 
     /// The hidden panel has no useful list working set. Reloading with no rows lets
@@ -412,6 +452,7 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
         resizeToContent()
         restoreSelection(preferring: selected)
     }
+
 
     // MARK: - Sizing
 
