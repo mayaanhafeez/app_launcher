@@ -11,10 +11,30 @@ return {
   --                       ~/.config/kitsune/themes/<name>.{toml,yaml,yml,conf,theme}
   --                       ~/omarchy/themes/<name>/colors.toml
   --                       ~/.config/{kitty,ghostty,btop}/themes/<name>
+  --                       ~/.config/kitsune/colour_schemes/<name>.{toml,yaml,...}
+  -- The last of those is the set shipped with the launcher, and it comes last on
+  -- purpose: where one of the tools above has the theme, that file wins and the panel
+  -- retints with the rest of the system. The shipped copies answer when nothing else
+  -- does, so every name in the Colour Scheme menu resolves on a bare machine.
   --   "~/path/to/scheme.yaml"   an explicit file
   -- Formats: Base16 YAML (base00-base0F), Omarchy colors.toml, kitty .conf,
   -- ghostty, btop .theme. They are all flat key -> hex, so one reader takes them all.
+  -- Because ~/.config/kitsune/themes/ is searched first, dropping a file there
+  -- shadows a scheme another tool ships under the same name -- which is what
+  -- themes/rose-pine.toml does, Omarchy's `rose-pine` being the light Dawn variant.
   palette = "auto",
+
+  -- Extra places to look for a named scheme, searched after ~/.config/kitsune/themes
+  -- and before the built-in locations above -- so this reaches a collection the list
+  -- has never heard of without giving up themes/<name> as the override slot.
+  -- An entry is either a directory, tried with each extension above, or a template
+  -- containing {name} for a collection that shapes the path some other way (Omarchy
+  -- makes the theme a *directory*, so a directory entry cannot reach it).
+  -- palette_paths = {
+  --   "~/.config/wezterm/colors",                 -- <name>.{toml,yaml,yml,conf,theme}
+  --   "~/.config/alacritty/themes/{name}.toml",   -- exactly this path
+  --   "~/dev/schemes/{name}/colors.toml",         -- the Omarchy shape
+  -- },
 
   -- Palette overrides. Uncomment to pin a role regardless of the palette; with all
   -- of them commented out the palette above is fully in charge.

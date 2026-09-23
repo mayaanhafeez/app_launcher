@@ -102,6 +102,7 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
     /// Held for the process lifetime: the panel controller is owned by the app
     /// delegate and outlives every other object, so there is nothing to tear down.
     private var keyMonitor: Any?
+    private var screenObserver: Any?
 
     var onQuery: ((String) -> Void)?
     var onActivate: ((DisplayRow) -> Void)?
@@ -131,6 +132,33 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
         buildUI(panel)
         apply(theme: theme)
         installKeyMonitor()
+        observeScreenChanges()
+    }
+
+    /// Every placement input — the screen list, the pointer, the focused window — is read
+    /// at `show()` and then held for the showing, so a display set that changes *after*
+    /// that read leaves the card anchored in geometry that no longer exists. Plugging a
+    /// monitor in moves the global coordinate origin, which is why the symptom was a card
+    /// far above its anchor rather than a few pixels out.
+    ///
+    /// AppKit has already updated `NSScreen.screens` by the time this fires, so the fix is
+    /// to drop the held anchors and re-place. A visible panel is re-anchored immediately;
+    /// a hidden one only needs `anchoredTop` cleared, since `show()` re-reads the rest.
+    private func observeScreenChanges() {
+        screenObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.screenParametersDidChange() }
+        }
+    }
+
+    private func screenParametersDidChange() {
+        anchoredTop = nil
+        guard window?.isVisible == true else { return }
+        captureAnchors()
+        resizeToContent()
     }
 
     /// Normal mode has to intercept plain characters, and `performKeyEquivalent` is
@@ -231,15 +259,42 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
         scroll.isHidden = isCollapsed
         resizeToContent()
         emptyLabel.isHidden = isCollapsed || !rows.isEmpty
-        if rows.isEmpty { table.deselectAll(nil) }
-        else {
-            // Never land on the back row: Return on a freshly opened submenu has to
-            // activate something in it, not walk straight back out.
-            let first = rows.firstIndex { $0.kind != .back } ?? 0
-            table.selectRowIndexes(IndexSet(integer: first), byExtendingSelection: false)
-            table.scrollRowToVisible(first)
+        // A new list starts at the top: leaving an ordinary submenu is a fresh start, so
+        // there is no previous place to keep.
+        restoreSelection()
+    }
+
+    /// Selects a row and paints it. `NSTableView.reloadData()` drops the selection, and
+    /// this is the only thing that puts one back, so every path that reloads has to end
+    /// here or the panel opens with nothing selected and Return acts on nothing.
+    ///
+    /// `preferring` keeps the user's place when it is still a real row — a theme reload
+    /// must not move the selection in a list they are already navigating. Otherwise the
+    /// first row that is not the back row: Return on a freshly opened submenu has to
+    /// activate something in it, not walk straight back out.
+    ///
+    /// Call it *after* `resizeToContent()`, for the same reason `update` reloads before
+    /// resizing: repainting walks realized rows, and the table has none until it has been
+    /// laid out at its final height.
+    private func restoreSelection(preferring previous: Int? = nil) {
+        guard let target = Self.selectionTarget(in: rows, preferring: previous) else {
+            table.deselectAll(nil)
+            repaintSelection()
+            return
         }
+        table.selectRowIndexes(IndexSet(integer: target), byExtendingSelection: false)
+        table.scrollRowToVisible(target)
         repaintSelection()
+    }
+
+    /// The row a list should land on, or nil for an empty one. Pure, like `VimKeys` and
+    /// `RowActions`, so the rule is testable without a window.
+    nonisolated static func selectionTarget(in rows: [DisplayRow], preferring previous: Int?) -> Int? {
+        guard !rows.isEmpty else { return nil }
+        if let previous, rows.indices.contains(previous), rows[previous].kind != .back {
+            return previous
+        }
+        return rows.firstIndex { $0.kind != .back } ?? 0
     }
 
     /// The back row carries no shortcut and takes no number, so the hints stay in
@@ -345,12 +400,17 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
 
         table.intercellSpacing = NSSize(width: 0, height: theme.space(theme.rowGap))
         table.rowHeight = theme.rowHeight(hasDetail: false)
+        // Read before the reload discards it; `update` cannot put it back, because it
+        // early-returns whenever the rows are unchanged — which a reload usually leaves
+        // them, the menu being the same menu.
+        let selected = table.selectedRow
         table.reloadData()
         updatePrompt()
         // A theme can move the panel or change its width, so it re-anchors rather than
         // holding the top edge the previous theme's geometry put there.
         anchoredTop = nil
         resizeToContent()
+        restoreSelection(preferring: selected)
     }
 
     // MARK: - Sizing

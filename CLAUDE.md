@@ -41,7 +41,34 @@ Two executables from one SwiftPM package (`Package.swift`), plus a vendored Lua 
   `colors.toml`, kitty `.conf`, ghostty and btop `.theme` are all flat `key → hex` files
   differing only in separator and key vocabulary, so one tokenizer reads every dialect and
   `role` accessors resolve semantic roles against a priority list of key names. Adding a
-  format means adding key names to those lists, not a parser.
+  format means adding key names to those lists, not a parser. `resolve` stats a fixed
+  candidate list — never a scan — and takes the first file that exists and parses.
+  The list is walked **location-major**, with the hyphen/underscore spellings tried only
+  *within* a location: walking the whole list once per spelling instead silently inverts
+  the order whenever a name is spelled the way a later location prefers — btop's theme
+  directory is entirely underscored and `colour_schemes` is hyphenated like the menu, so
+  every shipped scheme beat btop's file for the same theme. `~/.config/kitsune/themes/`
+  is **first**, which is the override slot: `Config/themes/rose-pine.toml` exists because
+  Omarchy ships its `rose-pine` as the light Dawn variant, so `palette = "auto"` went
+  light while the rest of the system was on dark Rosé Pine. `palette_paths` in
+  `theme.lua` extends the list **after** that slot and **before** the built-in locations,
+  so a config can reach a collection nothing here has heard of without giving up the
+  shadowing. An entry is a directory or a `{name}` template, because the built-in
+  locations are not one shape — ghostty names a bare file, kitty adds an extension, and
+  Omarchy makes the theme the *directory* (`<name>/colors.toml`), which a directory-only
+  list cannot express; each entry is its own location, so both spellings are tried before
+  the next entry. It is read in `ThemeRuntime.load` and passed straight to `resolve`
+  rather than carried on `Theme`, which is the appearance surface — this is an input to
+  *finding* the scheme, not a token the panel draws with. `Config/colour_schemes/` is
+  the set shipped for the names the Colour Scheme menu offers, and it is deliberately
+  **last** in that list: where kitty, ghostty, btop or
+  Omarchy has the theme, their file still wins and the panel retints with the rest of
+  the system, so the shipped copies only decide a name nothing else can answer. They are
+  conversions, not originals — Omarchy's `colors.toml` where it has the name, otherwise
+  btop's `.theme` mapped onto the roles — and the two things a conversion gets wrong are
+  what the tests pin: btop's `hi_fg` is a highlight *foreground* that several themes set
+  to the text colour, and Omarchy's `kanagawa` sets `accent` to its foreground the same
+  way, either of which leaves the accent invisible against the label it tints.
 - **`CLua`** — `Vendor/lua-5.4.8/src` compiled in-tree. `Vendor/lua-5.4.8/src/include/CLua.h` is a hand-written shim
   exposing what Swift can't import from Lua's headers (`LUA_REGISTRYINDEX` is a macro; `lua_error` is variadic-adjacent).
   Add to that shim rather than reaching into the Lua sources. Treat everything else under `Vendor/` as upstream — do not
@@ -310,6 +337,16 @@ Accessibility lookup that returns nil rather than guessing and drops those choic
 Both the pointer and that lookup are captured in `captureAnchors()` **once per showing**, not per resize:
 `resizeToContent` runs on every keystroke, an Accessibility call is cross-process, and re-reading the pointer would let
 the panel crawl after the mouse — or hop displays — while the user types into it.
+
+Holding them for the showing is what makes a **display change** the one event that has to break the rule, so
+`NSApplication.didChangeScreenParametersNotification` is observed: it drops `anchoredTop` and, if the panel is visible,
+re-captures and re-places. Plugging a monitor in moves the global coordinate origin, so a showing anchored just before
+that lands far from its anchor rather than a few pixels out; AppKit has already updated `NSScreen.screens` by the time
+the notification fires, which is what makes re-placing there correct. A hidden panel needs only `anchoredTop` cleared,
+since `show()` re-reads the rest. For the same reason `screenIndex` resolves a point no display contains to the
+**nearest** display rather than the primary one — a monitor unplugged while the pointer was on it strands the pointer
+outside every remaining screen, and anchoring on the primary display there clamps the card into the wrong display's
+coordinates. Empty `screens` still answers 0.
 
 The panel is ordered in with `animationBehavior = .none`. Left at `.default`, AppKit picks a fade for
 a panel, and ramping the alpha of a rounded, shadowed card over ~6 frames makes its outline look like

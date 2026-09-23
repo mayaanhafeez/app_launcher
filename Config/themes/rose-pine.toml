@@ -1,0 +1,41 @@
+# Rosé Pine (the dark original), in Omarchy's colors.toml vocabulary.
+#
+# Omarchy ships its `rose-pine` theme as the *light* Dawn variant, so with
+# `palette = "auto"` and `~/.config/theme` holding `rose-pine` the panel came up
+# light while kitty, ghostty and nvim were all on dark Rosé Pine. Palette.resolve
+# checks `~/.config/kitsune/themes/<name>` before `~/omarchy/themes/<name>`, so
+# this file shadows that one by name alone. Delete it to go back to Omarchy's.
+#
+# The light variant is still reachable as `rose-pine-dawn`, which resolves
+# through ~/.config/btop/themes/rose_pine_dawn.theme.
+
+mode = "dark"
+
+accent = "#c4a7e7"     # iris, matching set-theme's ACCENT_COLOR for this theme
+selection = "#403d52"  # highlight med
+muted = "#6e6a86"
+
+background = "#191724"          # base
+lighter_background = "#1f1d2e"  # surface
+dark_background = "#26233a"     # overlay
+darker_background = "#21202e"   # highlight low
+
+foreground = "#e0def4"         # text
+dark_foreground = "#6e6a86"    # muted
+light_foreground = "#908caa"   # subtle
+bright_foreground = "#e0def4"
+
+red = "#eb6f92"      # love
+yellow = "#f6c177"   # gold
+orange = "#ebbcba"   # rose
+green = "#31748f"    # pine
+cyan = "#ebbcba"     # rose
+blue = "#9ccfd8"     # foam
+magenta = "#c4a7e7"  # iris
+
+bright_red = "#eb6f92"
+bright_yellow = "#f6c177"
+bright_green = "#31748f"
+bright_cyan = "#ebbcba"
+bright_blue = "#9ccfd8"
+bright_magenta = "#c4a7e7"

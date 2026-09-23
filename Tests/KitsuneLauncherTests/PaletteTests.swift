@@ -118,3 +118,123 @@ private func hex(_ color: NSColor?) -> String? {
     #expect(hex(theme.fg) == "fefefe")
     #expect(theme.radius == radius)   // palettes carry colour only
 }
+
+// MARK: - palette_paths
+
+private func writeScheme(_ url: URL, background: String) throws {
+    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try "background = #\(background)\nforeground = #ffffff".write(to: url, atomically: true, encoding: .utf8)
+}
+
+@Test func paletteSearchPathsAcceptADirectory() throws {
+    let root = kitsuneTemporaryDirectory("kitsune-palette")
+    defer { kitsuneRemove(root) }
+    let config = root.appendingPathComponent("config")
+    let extra = root.appendingPathComponent("schemes")
+    // Found by extension, without the config having to name one.
+    try writeScheme(extra.appendingPathComponent("seaside.yaml"), background: "112233")
+
+    let palette = try #require(Palette.resolve("seaside", configDirectory: config, searchPaths: [extra.path]))
+    #expect(palette.name == "seaside")
+    #expect(hex(palette.background) == "112233")
+}
+
+@Test func paletteSearchPathsAcceptANameTemplate() throws {
+    let root = kitsuneTemporaryDirectory("kitsune-palette")
+    defer { kitsuneRemove(root) }
+    let config = root.appendingPathComponent("config")
+    let extra = root.appendingPathComponent("schemes")
+    // The Omarchy shape — the theme is the directory — which a directory entry cannot reach.
+    try writeScheme(extra.appendingPathComponent("seaside/colors.toml"), background: "445566")
+
+    let template = extra.appendingPathComponent("{name}/colors.toml").path
+    #expect(Palette.resolve("seaside", configDirectory: config, searchPaths: [extra.path]) == nil)
+    let palette = try #require(Palette.resolve("seaside", configDirectory: config, searchPaths: [template]))
+    #expect(hex(palette.background) == "445566")
+}
+
+@Test func paletteSearchPathsAreTriedInOrderBehindTheConfigDirectory() throws {
+    let root = kitsuneTemporaryDirectory("kitsune-palette")
+    defer { kitsuneRemove(root) }
+    let config = root.appendingPathComponent("config")
+    let first = root.appendingPathComponent("first")
+    let second = root.appendingPathComponent("second")
+    try writeScheme(first.appendingPathComponent("seaside.toml"), background: "111111")
+    try writeScheme(second.appendingPathComponent("seaside.toml"), background: "222222")
+
+    // Listed order decides between two search paths...
+    #expect(hex(Palette.resolve("seaside", configDirectory: config, searchPaths: [first.path, second.path])?.background) == "111111")
+    #expect(hex(Palette.resolve("seaside", configDirectory: config, searchPaths: [second.path, first.path])?.background) == "222222")
+
+    // ...but the config directory still wins, so themes/<name> stays the override slot.
+    try writeScheme(config.appendingPathComponent("themes/seaside.toml"), background: "333333")
+    #expect(hex(Palette.resolve("seaside", configDirectory: config, searchPaths: [first.path, second.path])?.background) == "333333")
+}
+
+// btop spells its themes with underscores, so `resolve` tries that spelling too — and a
+// search path gets both, exactly as the built-in locations do. The name here is one no
+// machine can already have: a real theme name would let the developer's own
+// ~/omarchy or ~/.config/btop answer first and the test would pass or fail by accident.
+@Test func paletteSearchPathsTryTheUnderscoredSpellingToo() throws {
+    let root = kitsuneTemporaryDirectory("kitsune-palette")
+    defer { kitsuneRemove(root) }
+    let extra = root.appendingPathComponent("schemes")
+    try writeScheme(extra.appendingPathComponent("kitsune_test_scheme.theme"), background: "191724")
+
+    let palette = try #require(Palette.resolve("kitsune-test-scheme", configDirectory: root.appendingPathComponent("config"),
+                                               searchPaths: [extra.path]))
+    #expect(hex(palette.background) == "191724")
+}
+
+@Test func emptyPaletteSearchPathEntriesAreIgnored() throws {
+    let root = kitsuneTemporaryDirectory("kitsune-palette")
+    defer { kitsuneRemove(root) }
+    let extra = root.appendingPathComponent("schemes")
+    try writeScheme(extra.appendingPathComponent("seaside.conf"), background: "778899")
+
+    let palette = try #require(Palette.resolve("seaside", configDirectory: root.appendingPathComponent("config"),
+                                               searchPaths: ["", "   ", extra.path]))
+    #expect(hex(palette.background) == "778899")
+}
+
+// The key has to survive the trip through the restricted theme state, which is a
+// separate decoder from the config one: `palette` was reachable there and a list was not.
+@Test func themeLuaPaletteSearchPathsReachTheResolver() throws {
+    let root = kitsuneTemporaryDirectory("kitsune-palette")
+    defer { kitsuneRemove(root) }
+    let extra = root.appendingPathComponent("schemes")
+    try writeScheme(extra.appendingPathComponent("kitsune-test-scheme.toml"), background: "0a0b0c")
+
+    let config = root.appendingPathComponent("config")
+    try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
+    let file = config.appendingPathComponent("theme.lua")
+    try """
+    return {
+      palette = "kitsune-test-scheme",
+      palette_paths = { "\(extra.path)" },
+    }
+    """.write(to: file, atomically: true, encoding: .utf8)
+
+    let runtime = ThemeRuntime()
+    let theme = runtime.load(file: file)
+    #expect(runtime.paletteName == "kitsune-test-scheme")
+    #expect(hex(theme.bg) == "0a0b0c")
+}
+
+// The one palette the repo ships, and only because Omarchy's `rose-pine` is the light
+// Dawn variant: if this file ever reads light again, `palette = "auto"` is back to
+// lighting the panel while the rest of the system is dark.
+@Test func shippedRosePineOverrideIsTheDarkVariant() throws {
+    let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        .deletingLastPathComponent().deletingLastPathComponent()
+    let palette = try #require(Palette.load(contentsOf: repo.appendingPathComponent("Config/themes/rose-pine.toml")))
+
+    #expect(palette.name == "rose-pine")
+    #expect(hex(palette.background) == "191724")   // base, not Dawn's faf4ed
+    #expect(hex(palette.foreground) == "e0def4")
+    #expect(hex(palette.surface) == "1f1d2e")
+    #expect(hex(palette.accent) == "c4a7e7")       // iris, as set-theme picks for this theme
+    #expect(hex(palette.selection) == "403d52")
+    #expect(hex(palette.muted) == "6e6a86")
+    #expect(palette.border != nil)
+}
