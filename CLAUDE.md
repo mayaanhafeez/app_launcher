@@ -41,14 +41,11 @@ Two executables from one SwiftPM package (`Package.swift`), plus a vendored Lua 
   `colors.toml`, kitty `.conf`, ghostty and btop `.theme` are all flat `key → hex` files
   differing only in separator and key vocabulary, so one tokenizer reads every dialect and
   `role` accessors resolve semantic roles against a priority list of key names. Adding a
-<<<<<<< HEAD
-=======
   format means adding key names to those lists, not a parser. `border` is the one role no
   dialect names, so its list leads with the literal key `border`: a scheme file can pin the
   border outright, and a file that never heard of the key still derives one from
   `lighter_background`. `resolve` stats a fixed
   candidate list — never a scan — and takes the first file that exists and parses.
->>>>>>> feat/palette-config-only-search
   The list is walked **location-major**, with the hyphen/underscore spellings tried only
   *within* a location: walking the whole list once per spelling instead silently inverts
   the order whenever a name is spelled the way a later location prefers — `colour_schemes`
@@ -73,9 +70,6 @@ Two executables from one SwiftPM package (`Package.swift`), plus a vendored Lua 
   rather than carried on `Theme`, which is the appearance surface — this is an input to
   *finding* the scheme, not a token the panel draws with. `Config/colour_schemes/` is
   the set shipped for the names the Colour Scheme menu offers, and it is deliberately
-<<<<<<< HEAD
-  **last** in that list:
-=======
   **last** in that list: a file in `themes/` or a collection named in `palette_paths`
   shadows it, so the shipped copies only decide a name nothing the user added can answer
   — which is also what makes every name in the menu resolve on a bare machine. They are
@@ -84,7 +78,6 @@ Two executables from one SwiftPM package (`Package.swift`), plus a vendored Lua 
   what the tests pin: btop's `hi_fg` is a highlight *foreground* that several themes set
   to the text colour, and Omarchy's `kanagawa` sets `accent` to its foreground the same
   way, either of which leaves the accent invisible against the label it tints.
->>>>>>> feat/palette-config-only-search
 - **`CLua`** — `Vendor/lua-5.4.8/src` compiled in-tree. `Vendor/lua-5.4.8/src/include/CLua.h` is a hand-written shim
   exposing what Swift can't import from Lua's headers (`LUA_REGISTRYINDEX` is a macro; `lua_error` is variadic-adjacent).
   Add to that shim rather than reaching into the Lua sources. Treat everything else under `Vendor/` as upstream — do not
