@@ -1,11 +1,12 @@
 # Retro 82 — shipped with KitsuneLauncher.
-# Source: Omarchy's themes/retro-82/colors.toml, unchanged.
+# Source: Omarchy's themes/retro-82/colors.toml, unchanged but for the `border` below.
 
 mode = "dark"
 
 accent = "#faa968"
 selection = "#134e5a"
 muted = "#2a6b78"
+border = "#faa968"  # matching set-theme's BORDERS_COLOR
 
 background = "#05182e"
 dark_background = "#031222"

@@ -110,6 +110,22 @@ private func hex(_ color: NSColor?) -> String? {
     #expect(hex(values["background"]) == "1f1f28")
 }
 
+// The role no dialect names, so a scheme file has to be able to say it outright:
+// deriving it from `lighter_background` is what made an edited `border = ...` inert.
+@Test func aSchemeCanNameTheBorderColourOutright() {
+    let explicit = Palette(name: "t", values: Palette.parse("""
+    border = "#5fcfc9"
+    lighter_background = "#24283b"
+    """))
+    #expect(hex(explicit.border) == "5fcfc9")
+    #expect(hex(explicit.surface) == "24283b")   // and only the border moves
+
+    // Without one, the dialect's nearest role still answers, so every scheme that never
+    // heard of the key keeps the border it had.
+    let derived = Palette(name: "t", values: Palette.parse("lighter_background = #24283b"))
+    #expect(hex(derived.border) == "24283b")
+}
+
 @Test func paletteSeedsThemeRolesButKeepsOtherTokens() {
     var theme = Theme()
     let radius = theme.radius
@@ -171,10 +187,9 @@ private func writeScheme(_ url: URL, background: String) throws {
     #expect(hex(Palette.resolve("seaside", configDirectory: config, searchPaths: [first.path, second.path])?.background) == "333333")
 }
 
-// btop spells its themes with underscores, so `resolve` tries that spelling too — and a
-// search path gets both, exactly as the built-in locations do. The name here is one no
-// machine can already have: a real theme name would let the developer's own
-// ~/omarchy or ~/.config/btop answer first and the test would pass or fail by accident.
+// Scheme collections spell a two-word theme both ways — btop's are entirely underscored
+// — so `resolve` tries the underscored spelling of a hyphenated name in every location,
+// a search path included.
 @Test func paletteSearchPathsTryTheUnderscoredSpellingToo() throws {
     let root = kitsuneTemporaryDirectory("kitsune-palette")
     defer { kitsuneRemove(root) }
@@ -184,6 +199,27 @@ private func writeScheme(_ url: URL, background: String) throws {
     let palette = try #require(Palette.resolve("kitsune-test-scheme", configDirectory: root.appendingPathComponent("config"),
                                                searchPaths: [extra.path]))
     #expect(hex(palette.background) == "191724")
+}
+
+// The config directory and `palette_paths` are the whole search. `resolve` used to walk
+// ~/omarchy and ~/.config/{kitty,ghostty,btop} as well, which made the config the least
+// authoritative place a scheme could live — an edited colour_schemes/<name>.toml was
+// never opened when one of those tools shipped the same theme. These are names those
+// tools really do ship, so on a machine that has them this fails if the walk comes back.
+@Test func resolveLooksNowhereOutsideTheConfigDirectoryAndItsSearchPaths() throws {
+    let root = kitsuneTemporaryDirectory("kitsune-palette")
+    defer { kitsuneRemove(root) }
+    let config = root.appendingPathComponent("config")
+
+    for name in ["tokyo-night", "catppuccin", "rose-pine", "kanagawa", "gruvbox"] {
+        #expect(Palette.resolve(name, configDirectory: config) == nil, "\(name) resolved from outside the config")
+    }
+
+    // And a search path is how one of those collections is reached again — by being named.
+    let elsewhere = root.appendingPathComponent("elsewhere")
+    try writeScheme(elsewhere.appendingPathComponent("tokyo-night/colors.toml"), background: "1a1b26")
+    let template = elsewhere.appendingPathComponent("{name}/colors.toml").path
+    #expect(hex(Palette.resolve("tokyo-night", configDirectory: config, searchPaths: [template])?.background) == "1a1b26")
 }
 
 @Test func emptyPaletteSearchPathEntriesAreIgnored() throws {
@@ -237,4 +273,131 @@ private func writeScheme(_ url: URL, background: String) throws {
     #expect(hex(palette.selection) == "403d52")
     #expect(hex(palette.muted) == "6e6a86")
     #expect(palette.border != nil)
+}
+
+// MARK: - Shipped colour schemes
+
+private func shippedSchemes() throws -> [(name: String, palette: Palette)] {
+    let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        .deletingLastPathComponent().deletingLastPathComponent()
+    let directory = repo.appendingPathComponent("Config/colour_schemes")
+    let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        .filter { $0.pathExtension == "toml" }.sorted { $0.path < $1.path }
+    return try files.map { (name: $0.deletingPathExtension().lastPathComponent, palette: try #require(Palette.load(contentsOf: $0))) }
+}
+
+// A shipped scheme that leaves a role unresolved falls back to that token's built-in
+// value, so half the panel would be the theme and half would not — and silently.
+@Test func everyShippedSchemeFillsEveryRole() throws {
+    let schemes = try shippedSchemes()
+    #expect(schemes.count == 21)
+    for (name, palette) in schemes {
+        #expect(palette.background != nil, "\(name) has no background")
+        #expect(palette.foreground != nil, "\(name) has no foreground")
+        #expect(palette.surface != nil, "\(name) has no surface")
+        #expect(palette.muted != nil, "\(name) has no muted")
+        #expect(palette.accent != nil, "\(name) has no accent")
+        #expect(palette.selection != nil, "\(name) has no selection")
+        #expect(palette.border != nil, "\(name) has no border")
+    }
+}
+
+// Every shipped scheme names its border rather than letting it fall back to
+// `lighter_background`: the value is the one `set-theme` hands JankyBorders for that
+// theme, so the panel's edge matches the window borders around it. A scheme that loses
+// the key still resolves a border, which is exactly why this is checked on the file.
+@Test func everyShippedSchemeNamesItsOwnBorder() throws {
+    let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        .deletingLastPathComponent().deletingLastPathComponent()
+    let directory = repo.appendingPathComponent("Config/colour_schemes")
+    let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        .filter { $0.pathExtension == "toml" }.sorted { $0.path < $1.path }
+    for file in files {
+        let values = Palette.parse(try String(contentsOf: file, encoding: .utf8))
+        let name = file.deletingPathExtension().lastPathComponent
+        #expect(values["border"] != nil, "\(name) does not name a border")
+    }
+}
+
+// btop's `hi_fg` is a highlight *foreground* and some themes set it to the text colour.
+// Converted blindly that leaves an accent invisible against the label it tints, which is
+// how the three Rosé Pine variants came to be mapped from upstream instead.
+@Test func noShippedSchemeUsesItsTextColourAsTheAccent() throws {
+    for (name, palette) in try shippedSchemes() {
+        #expect(hex(palette.accent) != hex(palette.foreground), "\(name)'s accent is its foreground")
+        #expect(hex(palette.background) != hex(palette.foreground), "\(name) is unreadable")
+    }
+}
+
+// The menu offers a name; the schemes answer it. A menu row with no scheme behind it is
+// one that silently does not retint — and now that a name resolves only under the config
+// directory, the shipped set is the only thing that can answer it. Only that direction is
+// checked: a scheme can land before the row that offers it, and `set-theme` knows names
+// this menu has not caught up with.
+@Test func shippedSchemesCoverEveryThemeTheMenuOffers() throws {
+    let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        .deletingLastPathComponent().deletingLastPathComponent()
+    let source = try String(contentsOf: repo.appendingPathComponent("Config/plugins/themes.lua"), encoding: .utf8)
+    // Just the `local themes = { ... }` table: the comments above it name other things.
+    let table = try #require(source.firstMatch(of: /local themes = \{([^}]*)\}/)).1
+    let listed = Set(table.matches(of: /"([a-z0-9-]+)"/).map { String($0.1) })
+    #expect(listed.count >= 20, "the theme table did not parse")
+    #expect(listed.subtracting(Set(try shippedSchemes().map(\.name))).isEmpty,
+            "offered by the menu with no shipped scheme")
+}
+
+// The Dawn confusion this set exists to end: Omarchy ships its `rose-pine` light, so the
+// shipped one must be the dark original and Dawn must keep its own name.
+@Test func shippedRosePineIsDarkAndDawnIsSeparate() throws {
+    let schemes = Dictionary(uniqueKeysWithValues: try shippedSchemes().map { ($0.name, $0.palette) })
+    #expect(hex(schemes["rose-pine"]?.background) == "191724")
+    #expect(hex(schemes["rose-pine-moon"]?.background) == "232136")
+    #expect(hex(schemes["rose-pine-dawn"]?.background) == "faf4ed")
+}
+
+// Shipped schemes live under the config directory, so `resolve` has to reach them there
+// — and yield to `themes/<name>`, which is the slot that overrides one without editing
+// the shipped file.
+@Test func shippedSchemesResolveByNameButYieldToTheOverrideSlot() throws {
+    let config = kitsuneTemporaryDirectory("kitsune-palette")
+    defer { kitsuneRemove(config) }
+    func write(_ relative: String, _ background: String) throws {
+        let url = config.appendingPathComponent(relative)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "background = #\(background)\nforeground = #ffffff".write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    try write("colour_schemes/kitsune-test-scheme.toml", "010203")
+    #expect(hex(Palette.resolve("kitsune-test-scheme", configDirectory: config)?.background) == "010203")
+
+    // themes/<name> still wins, so overriding a shipped scheme needs no edit to it.
+    try write("themes/kitsune-test-scheme.toml", "040506")
+    #expect(hex(Palette.resolve("kitsune-test-scheme", configDirectory: config)?.background) == "040506")
+}
+
+// A hyphenated name must not reach a *later* location before an *earlier* one gets to
+// try the underscored spelling. Walking the whole list per spelling did exactly that:
+// `colour_schemes` is hyphenated like the menu, so an underscored file in `themes/` — the
+// override slot — lost to the very shipped scheme it was put there to shadow.
+@Test func anEarlierLocationWinsEvenWhenItSpellsTheNameTheOtherWay() throws {
+    let config = kitsuneTemporaryDirectory("kitsune-palette")
+    defer { kitsuneRemove(config) }
+    func write(_ relative: String, _ background: String) throws {
+        let url = config.appendingPathComponent(relative)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "background = #\(background)\nforeground = #ffffff".write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    // themes/ is the earlier location and holds only the underscored spelling;
+    // colour_schemes/ is the later one and holds the hyphenated spelling the caller used.
+    try write("themes/kitsune_test_scheme.toml", "aaaaaa")
+    try write("colour_schemes/kitsune-test-scheme.toml", "bbbbbb")
+    #expect(hex(Palette.resolve("kitsune-test-scheme", configDirectory: config)?.background) == "aaaaaa")
+
+    // Only that direction: `resolve` spells a name with underscores as an alternative,
+    // never the reverse, so an underscored query does not reach a hyphenated file. Every
+    // name that arrives here — the menu's rows, ~/.config/theme — is hyphenated.
+    kitsuneRemove(config.appendingPathComponent("themes"))
+    #expect(Palette.resolve("kitsune-test-scheme", configDirectory: config) != nil)
+    #expect(Palette.resolve("kitsune_test_scheme", configDirectory: config) == nil)
 }

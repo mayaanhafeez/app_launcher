@@ -1,11 +1,12 @@
 # Nord — shipped with KitsuneLauncher.
-# Source: Omarchy's themes/nord/colors.toml, unchanged.
+# Source: Omarchy's themes/nord/colors.toml, unchanged but for the `border` below.
 
 mode = "dark"
 
 accent = "#81a1c1"
 selection = "#434c5e"
 muted = "#4c566a"
+border = "#81a1c1"  # matching set-theme's BORDERS_COLOR
 
 background = "#2e3440"
 dark_background = "#222730"

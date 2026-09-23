@@ -15,6 +15,7 @@ mode = "dark"
 accent = "#ea9a97"
 selection = "#44415a"
 muted = "#6e6a86"
+border = "#5fcfc9"  # teal, matching set-theme's BORDERS_COLOR
 
 background = "#232136"
 lighter_background = "#2a273f"
