@@ -290,7 +290,7 @@ private func shippedSchemes() throws -> [(name: String, palette: Palette)] {
 // value, so half the panel would be the theme and half would not — and silently.
 @Test func everyShippedSchemeFillsEveryRole() throws {
     let schemes = try shippedSchemes()
-    #expect(schemes.count == 21)
+    #expect(schemes.count == 22)
     for (name, palette) in schemes {
         #expect(palette.background != nil, "\(name) has no background")
         #expect(palette.foreground != nil, "\(name) has no foreground")
