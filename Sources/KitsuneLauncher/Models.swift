@@ -578,8 +578,15 @@ enum PanelScreenChoice: String, Sendable, CaseIterable {
 /// clamp is testable without a screen.
 enum PanelPlacement {
     /// The display to place the card on, as an index into `screens` — which is
-    /// `NSScreen.screens`, whose first element is the primary display. An empty or
-    /// unmatched lookup falls back to that primary display rather than to nothing.
+    /// `NSScreen.screens`, whose first element is the primary display.
+    ///
+    /// A point no display contains resolves to the **nearest** display, not to the
+    /// primary one. Those two only differ while the display set is changing: a monitor
+    /// that has just been unplugged leaves the pointer outside every remaining screen,
+    /// and falling back to the primary display there anchors the card on a display the
+    /// user isn't looking at — and clamps it into that display's coordinates, which is
+    /// what put the card far above its anchor. Empty `screens` still yields 0, which
+    /// callers treat as the fallback frame.
     static func screenIndex(
         _ choice: PanelScreenChoice,
         screens: [NSRect],
@@ -587,15 +594,26 @@ enum PanelPlacement {
         focusedWindow: NSRect?
     ) -> Int {
         func index(containing point: NSPoint) -> Int? { screens.firstIndex { $0.contains(point) } }
+        /// Squared distance from `point` to the rect, zero inside it: comparing
+        /// distances needs no square root.
+        func nearest(to point: NSPoint) -> Int {
+            let distances = screens.map { screen -> CGFloat in
+                let dx = max(screen.minX - point.x, 0, point.x - screen.maxX)
+                let dy = max(screen.minY - point.y, 0, point.y - screen.maxY)
+                return dx * dx + dy * dy
+            }
+            guard let best = distances.indices.min(by: { distances[$0] < distances[$1] }) else { return 0 }
+            return best
+        }
         switch choice {
         case .main: return 0
-        case .mouse: return index(containing: pointer) ?? 0
+        case .mouse: return index(containing: pointer) ?? nearest(to: pointer)
         case .active:
-            guard let focusedWindow else { return index(containing: pointer) ?? 0 }
+            guard let focusedWindow else { return index(containing: pointer) ?? nearest(to: pointer) }
             // The centre rather than the origin: a window straddling two displays
             // belongs to the one showing most of it.
-            return index(containing: NSPoint(x: focusedWindow.midX, y: focusedWindow.midY))
-                ?? index(containing: pointer) ?? 0
+            let centre = NSPoint(x: focusedWindow.midX, y: focusedWindow.midY)
+            return index(containing: centre) ?? index(containing: pointer) ?? nearest(to: centre)
         }
     }
 
