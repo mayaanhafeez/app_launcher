@@ -19,7 +19,7 @@ DIST="$ROOT/dist"
 
 APP=$("$ROOT/scripts/build-app.sh" | tail -1)
 
-VERSION=$(git -C "$ROOT" describe --tags --always --dirty 2>/dev/null || echo "0.0.0")
+VERSION=${KITSUNE_VERSION:-$(git -C "$ROOT" describe --tags --always --dirty 2>/dev/null || echo "0.0.0")}
 ZIP_NAME="KitsuneLauncher-$VERSION-macos.zip"
 
 rm -rf "$DIST"

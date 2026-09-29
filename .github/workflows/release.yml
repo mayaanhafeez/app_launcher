@@ -55,6 +55,10 @@ jobs:
 
       - name: Build the release zip
         id: build
+        env:
+          # Named outright rather than left to `git describe`, which picks either of
+          # two tags on one commit — an -rc and the release cut from it.
+          KITSUNE_VERSION: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
           scripts/release.sh | tee release.log
