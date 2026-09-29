@@ -49,6 +49,8 @@ jobs:
           set -euo pipefail
           APP=".build/KitsuneLauncher.app"
           test -x "$APP/Contents/MacOS/KitsuneLauncher"
+          # The cask links this onto PATH.
+          test -x "$APP/Contents/MacOS/kitsunectl"
 
           # Proves fetch-depth: 0 took effect, so the version below is real.
           test "$(git rev-parse --is-shallow-repository)" = "false"

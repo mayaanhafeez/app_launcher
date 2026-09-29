@@ -30,13 +30,22 @@ swift build -c release --package-path "$ROOT"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$ROOT/.build/release/KitsuneLauncher" "$APP/Contents/MacOS/$EXECUTABLE"
+# The CLI rides along so an install that never saw the source (the Homebrew cask
+# links it onto PATH) still has `kitsunectl reload` to check a config with.
+cp "$ROOT/.build/release/kitsunectl" "$APP/Contents/MacOS/kitsunectl"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 
 # Version stamping: derived from git, never hand-edited into the checked-in
 # plist. `git describe` degrades gracefully when there are no tags yet (falls
 # back to an abbreviated commit hash via --always); CFBundleVersion uses the
 # commit count so it only ever increases build over build.
-SHORT_VERSION=$(git -C "$ROOT" describe --tags --always --dirty 2>/dev/null || echo "0.0.0")
+# KITSUNE_VERSION pins it: the release workflow passes the tag it was triggered by,
+# since `git describe` picks arbitrarily between two tags on one commit (an -rc and
+# the release cut from it).
+SHORT_VERSION=${KITSUNE_VERSION:-$(git -C "$ROOT" describe --tags --always --dirty 2>/dev/null || echo "0.0.0")}
+# Tags are `v1.0.0`; the bundle version is `1.0.0`, the form the cask's `version` and
+# Finder's Get Info both expect.
+SHORT_VERSION=${SHORT_VERSION#v}
 BUILD_VERSION=$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo "0")
 PLIST="$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $SHORT_VERSION" "$PLIST"
@@ -69,5 +78,8 @@ rsync -a --exclude '.*' "$ROOT/Config/" "$APP/Contents/Resources/Config/"
 
 # Sign last: any edit to the bundle's contents after signing invalidates the
 # signature, so the plist and icon must land before codesign runs.
+# Nested code first: signing the bundle does not sign a second executable inside it,
+# and `codesign --verify --strict` rejects a bundle carrying an unsigned one.
+codesign --force --sign - "$APP/Contents/MacOS/kitsunectl"
 codesign --force --sign - "$APP"
 printf '%s\n' "$APP"

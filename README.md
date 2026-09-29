@@ -150,8 +150,13 @@ kitsunectl version              # report the running app's version
 normalized to dashes; an exact id wins over an alias, and an unknown route opens root.
 `invoke` needs an exact node id and fails on a category (submenu) or unknown id.
 
+It ships inside the app at `KitsuneLauncher.app/Contents/MacOS/kitsunectl`; the Homebrew
+cask links it onto your `PATH`. From a source build, link it yourself or go through
+SwiftPM:
+
 ```sh
-swift run kitsunectl toggle     # from a source checkout, without installing kitsunectl
+ln -s "$PWD/.build/KitsuneLauncher.app/Contents/MacOS/kitsunectl" /usr/local/bin/kitsunectl
+swift run kitsunectl toggle     # from a source checkout, without linking anything
 ```
 
 ## Building and testing
@@ -164,6 +169,20 @@ swift test --filter fuzzyMatching        # a single test
 ```
 
 There's no linter or formatter configured.
+
+## Releasing
+
+Push a tag from `main`; the [release workflow](.github/workflows/release.yml) does the rest:
+
+```sh
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+It runs the tests, builds the zip (`scripts/release.sh`), attaches it to a GitHub
+release, and rewrites `version` and `sha256` in `Casks/kitsune.rb` on `main`
+(`scripts/bump-cask.sh`). This repo is the Homebrew tap, so that commit is the whole of
+publishing: the next `brew upgrade` installs it. A tag with a hyphen (`v1.1.0-rc.1`) is
+published as a GitHub pre-release and never touches the cask.
 
 ## License
 
