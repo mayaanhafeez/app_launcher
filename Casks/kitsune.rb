@@ -31,6 +31,7 @@ cask "kitsune" do
   depends_on macos: :ventura
 
   app "KitsuneLauncher.app"
+  binary "#{appdir}/KitsuneLauncher.app/Contents/MacOS/kitsunectl"
 
   # No Developer ID certificate: every release is signed ad-hoc
   # (`codesign --force --sign -`), which Gatekeeper treats as untrusted.

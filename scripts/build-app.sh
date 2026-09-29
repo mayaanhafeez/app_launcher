@@ -30,6 +30,9 @@ swift build -c release --package-path "$ROOT"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$ROOT/.build/release/KitsuneLauncher" "$APP/Contents/MacOS/$EXECUTABLE"
+# The CLI rides along so an install that never saw the source (the Homebrew cask
+# links it onto PATH) still has `kitsunectl reload` to check a config with.
+cp "$ROOT/.build/release/kitsunectl" "$APP/Contents/MacOS/kitsunectl"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 
 # Version stamping: derived from git, never hand-edited into the checked-in
@@ -75,5 +78,8 @@ rsync -a --exclude '.*' "$ROOT/Config/" "$APP/Contents/Resources/Config/"
 
 # Sign last: any edit to the bundle's contents after signing invalidates the
 # signature, so the plist and icon must land before codesign runs.
+# Nested code first: signing the bundle does not sign a second executable inside it,
+# and `codesign --verify --strict` rejects a bundle carrying an unsigned one.
+codesign --force --sign - "$APP/Contents/MacOS/kitsunectl"
 codesign --force --sign - "$APP"
 printf '%s\n' "$APP"
