@@ -57,9 +57,9 @@ Two executables from one SwiftPM package (`Package.swift`), plus a vendored Lua 
   lost to whichever of those tools shipped the same theme, and was never opened. Those
   collections are reachable again by being named in `palette_paths`, explicitly and in an
   order the config chose. `~/.config/kitsune/themes/`
-  is **first**, which is the override slot: `Config/themes/rose-pine.toml` exists because
-  Omarchy ships its `rose-pine` as the light Dawn variant, so `palette = "auto"` went
-  light while the rest of the system was on dark Rosé Pine. `palette_paths` in
+  is **first**, which is the override slot — the template ships it empty, since what goes
+  there is one machine's answer (an Omarchy install, whose `rose-pine` is the light Dawn
+  variant, needs a dark `themes/rose-pine.toml` for `palette = "auto"`). `palette_paths` in
   `theme.lua` extends the list **after** that slot and **before** the shipped set,
   so a config can reach a collection nothing here has heard of without giving up the
   shadowing. An entry is a directory or a `{name}` template, because the collections in
@@ -169,8 +169,14 @@ empty path to `NSWorkspace` raises a system "file can't be found" dialog.
 the way a Neovim one does; `package.cpath` is emptied because a launcher config has no business
 dlopen-ing.
 
-Config lives at `~/.config/kitsune/{config.lua,theme.lua}` (`Config/` holds the templates users copy). A missing config
-falls back to `LuaRuntime.defaultNodes`; a config without a `root` item gets one injected.
+Config lives at `~/.config/kitsune/{config.lua,theme.lua}`. `scripts/build-app.sh` copies `Config/` into the bundle's
+`Resources/`, and `ConfigSeeder` copies it into the config directory at launch (and from Open Config Folder) — **only when
+`config.lua` is missing, and never over an existing file**, so it is a first-run step rather than a sync: a file the user
+deleted stays deleted. That makes `Config/` what a new user gets, so it must work on a bare Mac: a plugin that needs a
+tool or a path on the author's machine stays out of the default `plugins` list, and
+`theShippedTemplatesSeedAConfigThatLoads` pins that. Building from source is the only install path — there are no
+releases, and `Casks/kitsune.rb` is an unfilled template. A missing config falls back to `LuaRuntime.defaultNodes`; a
+config without a `root` item gets one injected.
 
 `ConfigWatcher` watches **both the directory and each file**, with an 80ms debounce. A directory
 vnode event only fires when an entry is added, removed or renamed — rewriting a file in place

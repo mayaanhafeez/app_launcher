@@ -1,6 +1,10 @@
 -- Every theme `set-theme` knows about, as one generated submenu. Picking one writes
 -- ~/.config/theme, which the launcher watches: with `palette = "auto"` in theme.lua it
 -- retints itself along with the rest of the system.
+--
+-- Needs `set-theme` at ~/.local/bin, so it is not in the default plugin list. Without
+-- it, pick a scheme by name with `palette = "<name>"` in theme.lua instead -- every
+-- name below ships in colour_schemes/.
 
 local themes = {
   "andromeda", "archriot", "blueridge-dark", "catppuccin-mocha", "dark-xp", "drive",

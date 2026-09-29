@@ -40,6 +40,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Before `reloadAll`: the menu bar spec arrives with the first settings
         // publish, and there would be nothing to apply it to otherwise.
         startMenuBar()
+        // Before the first load, so a fresh install loads the shipped config rather than
+        // the built-in fallback menu.
+        ConfigSeeder.seed(from: ConfigSeeder.bundledTemplates, to: configDirectory)
         reloadAll()
         appIndex.start()
         let hotKey = GlobalHotKey()
@@ -217,11 +220,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// A fresh install has no `~/.config/kitsune` until the templates are copied, and
-    /// opening a path that isn't there does nothing at all, so create it first.
+    /// Opening a path that isn't there does nothing at all, so create it first — and
+    /// seed it, so a config deleted since launch is not reopened as an empty folder.
     private func openConfigDirectory() {
         dismiss()
         try? FileManager.default.createDirectory(at: configDirectory, withIntermediateDirectories: true)
+        ConfigSeeder.seed(from: ConfigSeeder.bundledTemplates, to: configDirectory)
         NSWorkspace.shared.open(configDirectory)
     }
 

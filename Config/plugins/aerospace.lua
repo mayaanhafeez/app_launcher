@@ -235,7 +235,7 @@ return {
     item("wm.setup.edit", "Edit Config", {
       symbol = "chevron.left.forwardslash.chevron.right",
       shell = 'for f in ~/.config/hyprspace/config.toml ~/.aerospace.toml ~/.config/aerospace/aerospace.toml; '
-        .. 'do [ -f "$f" ] && exec ${EDITOR:-nvim} "$f"; done; echo "no config found"; read -r _',
+        .. 'do [ -f "$f" ] && exec ${EDITOR:-nano} "$f"; done; echo "no config found"; read -r _',
     }),
   },
 }
