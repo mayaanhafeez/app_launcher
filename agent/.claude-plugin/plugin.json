@@ -1,0 +1,10 @@
+{
+  "name": "kitsune",
+  "description": "Skills for configuring the Kitsune launcher and writing its Lua plugins.",
+  "version": "1.0.0",
+  "author": { "name": "Ayaan Hafeez" },
+  "homepage": "https://github.com/mayaanhafeez/app_launcher",
+  "repository": "https://github.com/mayaanhafeez/app_launcher",
+  "license": "MIT",
+  "keywords": ["kitsune", "launcher", "macos", "lua"]
+}

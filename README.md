@@ -129,6 +129,25 @@ theme token, palettes, and a worked plugin example — lives in
 [docs/configuration.md](docs/configuration.md).** This README stays intentionally
 thin; that's where the detail belongs.
 
+## Agent skills
+
+`agent/` is a Claude Code plugin with two skills, so a coding agent can work on your
+config without reading the source first:
+
+- **kitsune-config** — editing `~/.config/kitsune`: menus, settings, hotkeys, theme,
+  and checking the result with `kitsunectl reload`.
+- **kitsune-plugin** — writing a plugin: when to use a provider, a command menu or an
+  action, the sandbox rules a provider has to follow, and how to test it.
+
+```sh
+claude plugin marketplace add mayaanhafeez/app_launcher
+claude plugin install kitsune@kitsune
+```
+
+The skills are plain `SKILL.md` folders under `agent/skills/`, so any agent that
+reads the [Agent Skills](https://agentskills.io) format can use them — copy them
+wherever yours looks.
+
 ## `kitsunectl`
 
 A small CLI that drives a running Kitsune instance over a Unix socket
