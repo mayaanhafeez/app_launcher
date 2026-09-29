@@ -837,21 +837,17 @@ signature has to accept it regardless, since Kitsune always calls a provider
 with the current query as its first argument.
 
 **3. Load the plugin from `config.lua`.** Plugins aren't auto-discovered; the
-shipped `config.lua` loads a fixed list by name:
+shipped `config.lua` loads the ones named in its `plugins` list, in that order:
 
 ```lua
-for _, name in ipairs({ "example", "smart", "text", "projects", "themes", "brew" }) do
-  local ok, plugin = pcall(require, "plugins." .. name)
-  if ok and type(plugin) == "table" then
-    for _, entry in ipairs(plugin.items or {}) do items[#items + 1] = entry end
-    for key, fn in pairs(plugin.providers or {}) do providers[key] = fn end
-  end
-end
+plugins = {
+  "smart", "text", "brew", "settings", "find", "currency", "units", "uuid",
+},
 ```
 
-Add `"uuid"` to that list (or write your own loop — `require "plugins.uuid"`
-resolves via the `package.path` entries described above regardless of how you
-call it).
+Add `"uuid"` where its rows should sort. `lua/loader.lua` does the `require
+"plugins.uuid"` and merges its `items` and `providers`; a plugin that fails to load is
+reported (red menu bar icon, Show Last Error) and the rest of the menu still loads.
 
 **4. Save.** Kitsune's file watcher picks up the change within about 80ms and
 reloads `config.lua` automatically — no restart needed. Open the panel, type

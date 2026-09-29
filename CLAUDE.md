@@ -42,6 +42,15 @@ prints a deprecation warning for on every command. Lint it with `brew style Cask
 - Delete the feature or bug-fix branch after it is merged into `main`.
 - Do not make feature or bug-fix commits directly on `dev` or `main`.
 
+## Agent skills
+
+`agent/` is a Claude Code plugin (`agent/.claude-plugin/plugin.json`, listed by the repo-root
+`.claude-plugin/marketplace.json`) shipping two skills for *users'* agents: `kitsune-config` and
+`kitsune-plugin`. They restate the Lua contract — item fields, the provider sandbox, command
+rows and `on_select`, the `kitsunectl` checks — so **a change to that contract has to land in
+the skills too**, or users' agents will be taught the old one. Validate with
+`claude plugin validate agent` and `claude plugin validate .`.
+
 ## Architecture
 
 Two executables from one SwiftPM package (`Package.swift`), plus a vendored Lua 5.4.8 C target:

@@ -1,0 +1,16 @@
+{
+  "name": "kitsune",
+  "owner": {
+    "name": "Ayaan Hafeez"
+  },
+  "metadata": {
+    "description": "Agent skills for the Kitsune macOS launcher."
+  },
+  "plugins": [
+    {
+      "name": "kitsune",
+      "source": "./agent",
+      "description": "Skills for configuring the Kitsune launcher and writing its Lua plugins."
+    }
+  ]
+}
