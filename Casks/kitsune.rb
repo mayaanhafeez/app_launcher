@@ -38,9 +38,8 @@ cask "kitsune" do
   # is damaged and can't be opened" / "cannot verify developer"). Casks
   # for notarized apps don't need this — this one does because there is no
   # Developer ID to notarize with.
-  postflight do
-    system_command "/usr/bin/xattr",
-                   args: ["-dr", "com.apple.quarantine", "#{appdir}/KitsuneLauncher.app"]
+  postflight_steps do
+    run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{appdir}}/KitsuneLauncher.app"]
   end
 
   zap trash: [

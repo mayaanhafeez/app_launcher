@@ -21,6 +21,19 @@ prompts after a rebuild.
 
 There is no linter or formatter configured.
 
+## Releasing
+
+A `v*` tag pushed from `main` is the whole release: `.github/workflows/release.yml` tests, runs `scripts/release.sh`,
+attaches the zip to a GitHub release and runs `scripts/bump-cask.sh` to rewrite `version`/`sha256` in `Casks/kitsune.rb`,
+committing that to `main`. This repo is the tap, so that commit is what `brew upgrade` sees — **Homebrew is the only
+update path**; the app has no updater of its own. Never hand-edit those two cask lines. A hyphenated tag is a GitHub
+pre-release and never reaches the cask, since every tap user would be upgraded onto it.
+
+`build-app.sh` strips the tag's `v` from `CFBundleShortVersionString`, while the zip name keeps it
+(`KitsuneLauncher-v1.0.0-macos.zip`) — the cask URL is built from both forms. The cask strips Gatekeeper quarantine in
+`postflight_steps` (`run "/usr/bin/xattr" … "{{appdir}}/…"`), not a legacy `postflight` block, which current Homebrew
+prints a deprecation warning for on every command. Lint it with `brew style Casks/kitsune.rb`.
+
 ## Git workflow
 
 - Create every feature or bug-fix branch from `main`.
@@ -174,8 +187,7 @@ Config lives at `~/.config/kitsune/{config.lua,theme.lua}`. `scripts/build-app.s
 `config.lua` is missing, and never over an existing file**, so it is a first-run step rather than a sync: a file the user
 deleted stays deleted. That makes `Config/` what a new user gets, so it must work on a bare Mac: a plugin that needs a
 tool or a path on the author's machine stays out of the default `plugins` list, and
-`theShippedTemplatesSeedAConfigThatLoads` pins that. Building from source is the only install path — there are no
-releases, and `Casks/kitsune.rb` is an unfilled template. A missing config falls back to `LuaRuntime.defaultNodes`; a
+`theShippedTemplatesSeedAConfigThatLoads` pins that. A missing config falls back to `LuaRuntime.defaultNodes`; a
 config without a `root` item gets one injected.
 
 `ConfigWatcher` watches **both the directory and each file**, with an 80ms debounce. A directory

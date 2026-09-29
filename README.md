@@ -165,6 +165,20 @@ swift test --filter fuzzyMatching        # a single test
 
 There's no linter or formatter configured.
 
+## Releasing
+
+Push a tag from `main`; the [release workflow](.github/workflows/release.yml) does the rest:
+
+```sh
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+It runs the tests, builds the zip (`scripts/release.sh`), attaches it to a GitHub
+release, and rewrites `version` and `sha256` in `Casks/kitsune.rb` on `main`
+(`scripts/bump-cask.sh`). This repo is the Homebrew tap, so that commit is the whole of
+publishing: the next `brew upgrade` installs it. A tag with a hyphen (`v1.1.0-rc.1`) is
+published as a GitHub pre-release and never touches the cask.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
