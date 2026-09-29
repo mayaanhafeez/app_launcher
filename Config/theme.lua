@@ -6,8 +6,7 @@
 return {
   -- Colour scheme. Seeds bg/surface/fg/fg_muted/accent/border/selection_bg from an
   -- external scheme file; anything you set below still overrides it.
-  --   "auto"            follow ~/.config/theme (so `set-theme` retints this too)
-  --   "kanagawa"        a name, searched in this order:
+  --   "kitsune"         a name, searched in this order:
   --                       ~/.config/kitsune/themes/<name>.{toml,yaml,yml,conf,theme}
   --                       each palette_paths entry below, in the order listed
   --                       ~/.config/kitsune/colour_schemes/<name>.{toml,yaml,...}
@@ -19,11 +18,13 @@ return {
   -- ~/.config/kitsune the ones in charge rather than whichever tool happens to be
   -- installed.
   --   "~/path/to/scheme.yaml"   an explicit file
+  --   "auto"            the name written in ~/.config/theme, for a theme switcher such
+  --                     as `set-theme` that records the active theme there
   -- Formats: Base16 YAML (base00-base0F), Omarchy colors.toml, kitty .conf,
   -- ghostty, btop .theme. They are all flat key -> hex, so one reader takes them all.
   -- The roles read are background/foreground/accent/selection/muted/surface, plus
   -- `border` -- no dialect names a border, so a scheme file can set that key itself.
-  palette = "auto",
+  palette = "kitsune",
 
   -- Extra places to look for a named scheme, searched after ~/.config/kitsune/themes
   -- and before the shipped colour_schemes/ -- so this reaches a collection the launcher

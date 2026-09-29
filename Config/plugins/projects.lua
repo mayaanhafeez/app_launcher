@@ -1,16 +1,17 @@
--- Four lines of data become a submenu with five actions each. This is the pattern the
--- menu is built for: describe the data, generate the tree.
+-- A line of data per project becomes a submenu with five actions each. This is the
+-- pattern the menu is built for: describe the data, generate the tree.
+--
+-- Not in the default plugin list, because the list below is yours to fill: add a line
+-- per repository, then add "projects" to `plugins` in config.lua.
 
 local projects = {
-  { id = "launcher", label = "App Launcher", path = "~/personal/app_launcher" },
-  { id = "settheme", label = "Set Theme",    path = "~/set-theme" },
-  { id = "omarchy",  label = "Omarchy",      path = "~/omarchy", icon = "~/omarchy/icon.png" },
-  { id = "aether",   label = "Aether",       path = "~/aether" },
+  -- { id = "site", label = "Website", path = "~/code/website" },
+  -- { id = "dots", label = "Dotfiles", path = "~/.dotfiles", icon = "~/.dotfiles/icon.png" },
 }
 
 local actions = {
   { id = "edit",   label = "Edit",           symbol = "chevron.left.forwardslash.chevron.right",
-    command = "cd %s && ${EDITOR:-nvim} ." },
+    command = "cd %s && ${EDITOR:-nano} ." },
   { id = "shell",  label = "Terminal Here",  symbol = "terminal",  command = "cd %s && exec ${SHELL:-/bin/zsh}" },
   { id = "status", label = "Git Status",     symbol = "arrow.triangle.branch",
     command = "cd %s && git status && git log --oneline -12 && exec ${SHELL:-/bin/zsh}" },
