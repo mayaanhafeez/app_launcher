@@ -150,8 +150,13 @@ kitsunectl version              # report the running app's version
 normalized to dashes; an exact id wins over an alias, and an unknown route opens root.
 `invoke` needs an exact node id and fails on a category (submenu) or unknown id.
 
+It ships inside the app at `KitsuneLauncher.app/Contents/MacOS/kitsunectl`; the Homebrew
+cask links it onto your `PATH`. From a source build, link it yourself or go through
+SwiftPM:
+
 ```sh
-swift run kitsunectl toggle     # from a source checkout, without installing kitsunectl
+ln -s "$PWD/.build/KitsuneLauncher.app/Contents/MacOS/kitsunectl" /usr/local/bin/kitsunectl
+swift run kitsunectl toggle     # from a source checkout, without linking anything
 ```
 
 ## Building and testing
