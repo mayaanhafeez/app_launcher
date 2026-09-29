@@ -63,6 +63,10 @@ for TEMPLATE in "$ROOT"/Resources/MenuBarIconTemplate*.png; do
   [ -f "$TEMPLATE" ] && cp "$TEMPLATE" "$APP/Contents/Resources/"
 done
 
+# The config templates, which the app copies into ~/.config/kitsune on first launch
+# (ConfigSeeder). Hidden files are left behind: a .DS_Store is not config.
+rsync -a --exclude '.*' "$ROOT/Config/" "$APP/Contents/Resources/Config/"
+
 # Sign last: any edit to the bundle's contents after signing invalidates the
 # signature, so the plist and icon must land before codesign runs.
 codesign --force --sign - "$APP"

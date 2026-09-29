@@ -25,20 +25,8 @@ reshape the menu endlessly without ever touching Swift.
 
 ## Install
 
-### Homebrew (recommended)
-
-Kitsune isn't in homebrew/cask — it's ad-hoc signed rather than notarized, which
-wouldn't pass their review — so it ships from a personal tap instead:
-
-```sh
-brew tap mayaanhafeez/kitsune https://github.com/mayaanhafeez/app_launcher
-brew install --cask kitsune
-```
-
-The cask (`Casks/kitsune.rb`) strips the download's Gatekeeper quarantine flag
-automatically as a postflight step, so the first launch isn't blocked.
-
-### From source
+Kitsune is built from source for now — there are no release builds yet, so there is
+nothing to download.
 
 ```sh
 git clone https://github.com/mayaanhafeez/app_launcher
@@ -49,22 +37,19 @@ open .build/KitsuneLauncher.app
 
 `scripts/build-app.sh` is the only supported way to get a working app: it does a
 release build, assembles a real `.app` bundle from `Resources/Info.plist`, stamps the
-version from `git describe`, and ad-hoc codesigns it. A bare `swift build` binary has
-no bundle at all, so the accessory-app behavior (`LSUIElement`, no Dock/menu-bar icon
-beyond Kitsune's own) and the container-relative IPC socket path never apply to it.
+version from `git describe`, bundles the config templates, and ad-hoc codesigns it. A
+bare `swift build` binary has no bundle at all, so the accessory-app behavior
+(`LSUIElement`, no Dock/menu-bar icon beyond Kitsune's own), the container-relative IPC
+socket path and first-launch config seeding never apply to it.
 
-If you build straight from a downloaded zip instead of Homebrew (e.g. a GitHub release
-asset), macOS will quarantine it and refuse to open it ("KitsuneLauncher.app is damaged
-and can't be opened" / "cannot verify developer"). Clear the flag yourself, or
-right-click the app and choose Open once to bypass Gatekeeper for that copy:
+To update, pull and rebuild — your config is never touched:
 
 ```sh
-xattr -dr com.apple.quarantine .build/KitsuneLauncher.app   # or wherever you unzipped it
+git pull && scripts/build-app.sh
 ```
 
-This isn't a security workaround to take lightly — only do it for builds you trust.
-There's no Developer ID certificate behind these builds, so there's nothing else
-vouching for them.
+`Casks/kitsune.rb` and `scripts/release.sh` are groundwork for a Homebrew install once
+there are releases to point them at; the cask does not work yet.
 
 ## First launch: permission prompts
 
@@ -111,11 +96,16 @@ vocabulary. Both `config.lua` and `theme.lua` reload automatically on save.
 
 ## Configuration
 
-```sh
-mkdir -p ~/.config/kitsune
-cp Config/config.lua Config/theme.lua ~/.config/kitsune/
-cp -r Config/plugins Config/colour_schemes ~/.config/kitsune/
-```
+On first launch Kitsune copies the templates in `Config/` to `~/.config/kitsune`. It
+only does this when `~/.config/kitsune/config.lua` doesn't exist, and never overwrites a
+file, so edits survive every rebuild. To start over, move `config.lua` aside and relaunch
+(or choose **Open Config Folder**): the missing files are copied back in, and anything
+already there is left alone.
+
+The shipped config only uses what a bare Mac has. A few plugins are included but off,
+because they need something installed first — `projects`, `aerospace`, `themes` (driven
+by `set-theme`) and the annotated `example`; add a name to `plugins` in `config.lua` to
+turn one on.
 
 - `~/.config/kitsune/config.lua` — the menu tree, actions, providers, settings. Rebuilds
   the whole menu state on save.
@@ -124,15 +114,15 @@ cp -r Config/plugins Config/colour_schemes ~/.config/kitsune/
 - `~/.config/kitsune/plugins/`, `~/.config/kitsune/lua/` — anywhere else you `require`
   from `config.lua`, the way a Neovim config splits across files. Saving any `.lua` file
   below `~/.config/kitsune` reloads, so a split config hot-reloads like a single one.
-- `~/.config/kitsune/colour_schemes/` — a palette for every theme the Colour Scheme menu
-  offers, so those names resolve on a bare machine. A scheme name is looked up **only**
+- `~/.config/kitsune/colour_schemes/` — the shipped palettes; set `palette = "<name>"` in
+  `theme.lua` to pick one (the default is `kitsune`). A scheme name is looked up **only**
   here, in `~/.config/kitsune/themes/` and in the `palette_paths` your `theme.lua` lists;
   nothing under `~/omarchy` or `~/.config/{kitty,ghostty,btop}` is read unless you name it
   in `palette_paths`. To override a shipped scheme, put a file of the same name in
   `~/.config/kitsune/themes/`, which is searched first.
 
-A missing `config.lua` falls back to a small built-in menu (Apps / System / Tools), so
-Kitsune is usable before you've written anything.
+If `config.lua` is missing anyway (a bare `swift build` binary has no templates to
+copy), Kitsune falls back to a small built-in menu (Apps / System / Tools).
 
 **The full Lua reference — every item field, action kind, the provider sandbox, every
 theme token, palettes, and a worked plugin example — lives in

@@ -24,9 +24,13 @@ return load {
     "root", "learn", "trigger", "style", "setup", "homebrew", "update", "about",
     "system", "search",
   },
+  -- Only plugins that work on a bare Mac are listed. Also in plugins/, off by default:
+  --   example     the annotated tour of item fields -- a template, not a menu
+  --   projects    a submenu per repository; fill in its `projects` table first
+  --   aerospace   window switching, for the AeroSpace / Hyprspace window manager
+  --   themes      a Colour Scheme menu driven by the `set-theme` script
   plugins = {
-    "example", "smart", "text", "projects", "themes", "brew", "aerospace", "settings",
-    "find", "currency", "units",
+    "smart", "text", "brew", "settings", "find", "currency", "units",
   },
 
   -- Global chords. Each either toggles the panel (optionally at a `route`) or fires a
