@@ -1,0 +1,95 @@
+name: Release
+
+# Pushing a `v*` tag is the whole release: this builds the zip, attaches it to a GitHub
+# release, and — for a final version — points Casks/kitsune.rb at it on main. This repo
+# is the Homebrew tap, so that commit is what `brew upgrade` sees.
+#
+#   git tag v1.0.0 && git push origin v1.0.0
+#
+# A tag with a hyphen (v1.1.0-rc.1) is published as a GitHub pre-release and never
+# touches the cask, so it can be tried by hand without upgrading every tap user.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # `git describe --tags` names the zip and stamps the bundle version.
+          fetch-depth: 0
+
+      - name: Check the tag
+        id: tag
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' \
+            || { echo "::error::$TAG is not vX.Y.Z or vX.Y.Z-suffix"; exit 1; }
+          # The cask commit lands on main, so the tag has to be something main
+          # already contains — otherwise the cask would ship code main does not have.
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
+            || { echo "::error::$TAG is not on main"; exit 1; }
+          case "$VERSION" in *-*) PRERELEASE=true ;; *) PRERELEASE=false ;; esac
+          {
+            echo "tag=$TAG"
+            echo "version=$VERSION"
+            echo "prerelease=$PRERELEASE"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Test
+        run: swift test
+
+      - name: Build the release zip
+        id: build
+        env:
+          # Named outright rather than left to `git describe`, which picks either of
+          # two tags on one commit — an -rc and the release cut from it.
+          KITSUNE_VERSION: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          scripts/release.sh | tee release.log
+          ARCHIVE=$(awk '/^archive:/ { print $2 }' release.log)
+          SHA256=$(awk '/^sha256:/ { print $2 }' release.log)
+          # The cask URL is built from the version, so the asset has to carry exactly
+          # this name — a dirty tree or a stray tag would change it.
+          test "$(basename "$ARCHIVE")" = "KitsuneLauncher-${{ steps.tag.outputs.tag }}-macos.zip"
+          SHORT=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" .build/KitsuneLauncher.app/Contents/Info.plist)
+          test "$SHORT" = "${{ steps.tag.outputs.version }}"
+          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          FLAGS=(--title "Kitsune ${{ steps.tag.outputs.version }}" --generate-notes --verify-tag)
+          [ "${{ steps.tag.outputs.prerelease }}" = true ] && FLAGS+=(--prerelease)
+          gh release create "${{ steps.tag.outputs.tag }}" "${{ steps.build.outputs.archive }}" "${FLAGS[@]}"
+
+      - name: Point the cask at this release
+        if: steps.tag.outputs.prerelease == 'false'
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git switch main
+          git reset --hard origin/main
+          scripts/bump-cask.sh "${{ steps.tag.outputs.version }}" "${{ steps.build.outputs.sha256 }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Kitsune ${{ steps.tag.outputs.version }} in the cask"
+          git push origin main
