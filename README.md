@@ -25,8 +25,38 @@ reshape the menu endlessly without ever touching Swift.
 
 ## Install
 
-Kitsune is built from source for now — there are no release builds yet, so there is
-nothing to download.
+```sh
+brew tap mayaanhafeez/kitsune https://github.com/mayaanhafeez/app_launcher
+brew install --cask kitsune
+```
+
+The cask installs `KitsuneLauncher.app`, links `kitsunectl` onto your `PATH`, and clears
+the download's Gatekeeper quarantine flag so the first launch isn't blocked (builds are
+ad-hoc signed, not notarized). Kitsune isn't in homebrew/cask, which wouldn't accept an
+un-notarized app, so it ships from this repo as a tap.
+
+Updates come through Homebrew too — Kitsune has no updater of its own:
+
+```sh
+brew upgrade --cask kitsune
+```
+
+Your config is never touched by an install or an upgrade.
+
+### From a release zip
+
+Each [release](https://github.com/mayaanhafeez/app_launcher/releases) carries the zip the
+cask installs. Downloaded directly, macOS quarantines it and refuses to open it ("damaged
+and can't be opened" / "cannot verify developer"). Clear the flag yourself — only for a
+build you trust, since no Developer ID vouches for it:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/KitsuneLauncher.app
+```
+
+A zip install has no update path: download the next release the same way.
+
+### From source
 
 ```sh
 git clone https://github.com/mayaanhafeez/app_launcher
@@ -35,21 +65,14 @@ scripts/build-app.sh
 open .build/KitsuneLauncher.app
 ```
 
+To update a source build, `git pull && scripts/build-app.sh`.
+
 `scripts/build-app.sh` is the only supported way to get a working app: it does a
 release build, assembles a real `.app` bundle from `Resources/Info.plist`, stamps the
 version from `git describe`, bundles the config templates, and ad-hoc codesigns it. A
 bare `swift build` binary has no bundle at all, so the accessory-app behavior
 (`LSUIElement`, no Dock/menu-bar icon beyond Kitsune's own), the container-relative IPC
 socket path and first-launch config seeding never apply to it.
-
-To update, pull and rebuild — your config is never touched:
-
-```sh
-git pull && scripts/build-app.sh
-```
-
-`Casks/kitsune.rb` and `scripts/release.sh` are groundwork for a Homebrew install once
-there are releases to point them at; the cask does not work yet.
 
 ## First launch: permission prompts
 
