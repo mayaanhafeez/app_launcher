@@ -1,18 +1,16 @@
-# Homebrew Cask template for KitsuneLauncher.
-#
-# This is NOT published to homebrew/cask (it wouldn't pass their review: the
-# app is ad-hoc signed, not notarized, and this cask works around Gatekeeper
-# quarantine to install it anyway). It's meant for a personal tap, e.g.:
+# Homebrew cask for KitsuneLauncher, served from this repo as a personal tap:
 #
 #   brew tap mayaanhafeez/kitsune https://github.com/mayaanhafeez/app_launcher
 #   brew install --cask kitsune
 #
-# (that requires this file to live at Casks/kitsune.rb in the tap repo, which
-# it already does here).
+# It is NOT published to homebrew/cask (it wouldn't pass their review: the app is
+# ad-hoc signed, not notarized, and this cask works around Gatekeeper quarantine to
+# install it anyway).
 #
-# After each `scripts/release.sh`, fill in:
-#   - version:  the tag you cut (without the leading "v")
-#   - sha256:   printed by scripts/release.sh
+# Do not edit `version` or `sha256` by hand. Pushing a `v*` tag runs
+# .github/workflows/release.yml, which builds the zip, attaches it to the GitHub
+# release and rewrites both lines here (scripts/bump-cask.sh) on main — that commit
+# is what `brew upgrade` picks up.
 cask "kitsune" do
   version "0.0.0"
   sha256 "REPLACE_WITH_SHA256_FROM_scripts_release_sh"
@@ -22,6 +20,18 @@ cask "kitsune" do
   desc "Resident keyboard launcher and nested command menu, driven by Lua"
   homepage "https://github.com/mayaanhafeez/app_launcher"
 
+  # Pre-releases are never written into this file, so the latest *release* is the
+  # right thing for `brew livecheck` to compare against.
+  livecheck do
+    url :url
+    strategy :github_latest
+  end
+
+  # LSMinimumSystemVersion in Resources/Info.plist.
+  depends_on macos: :ventura
+
+  app "KitsuneLauncher.app"
+
   # No Developer ID certificate: every release is signed ad-hoc
   # (`codesign --force --sign -`), which Gatekeeper treats as untrusted.
   # Without this, macOS refuses to open the app at all ("KitsuneLauncher.app
@@ -30,14 +40,12 @@ cask "kitsune" do
   # Developer ID to notarize with.
   postflight do
     system_command "/usr/bin/xattr",
-                    args: ["-dr", "com.apple.quarantine", "#{appdir}/KitsuneLauncher.app"]
+                   args: ["-dr", "com.apple.quarantine", "#{appdir}/KitsuneLauncher.app"]
   end
 
-  app "KitsuneLauncher.app"
-
   zap trash: [
-    "~/Library/Containers/com.kitsune.launcher",
     "~/.config/kitsune",
+    "~/Library/Containers/com.kitsune.launcher",
   ]
 
   caveats <<~EOS

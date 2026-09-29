@@ -37,6 +37,9 @@ cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 # back to an abbreviated commit hash via --always); CFBundleVersion uses the
 # commit count so it only ever increases build over build.
 SHORT_VERSION=$(git -C "$ROOT" describe --tags --always --dirty 2>/dev/null || echo "0.0.0")
+# Tags are `v1.0.0`; the bundle version is `1.0.0`, the form the cask's `version` and
+# Finder's Get Info both expect.
+SHORT_VERSION=${SHORT_VERSION#v}
 BUILD_VERSION=$(git -C "$ROOT" rev-list --count HEAD 2>/dev/null || echo "0")
 PLIST="$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $SHORT_VERSION" "$PLIST"
