@@ -613,7 +613,6 @@ struct TintSpec: Sendable, Equatable {
     /// 0...1, the opacity of a behind-window blur under the wash. 0 draws no effect view.
     var blur: CGFloat = 0
     var screens: Screens = .panel
-    var fade: TimeInterval = 0.12
 
     var resolvedAlpha: CGFloat { alpha ?? (mode == .monochrome ? 0.35 : 0.15) }
 

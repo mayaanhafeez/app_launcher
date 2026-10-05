@@ -92,7 +92,7 @@ the palette, so leave them commented out unless the user wants a role pinned.
 `font_size` and `spacing_scale` each rescale the whole panel coherently; prefer them
 to editing many tokens. `screens = { ... }` overrides values per display.
 
-`tint = { mode, color, alpha, blur, screens, fade }` washes the screen behind the
+`tint = { mode, color, alpha, blur, screens }` washes the screen behind the
 open panel (off unless set; `tint = false` / `tint = "monochrome"` also work).
 `color` is a role name (`bg` by default, so it follows the palette) or a hex value;
 `monochrome` is a black dim, not a greyscale filter. A display's `tint` in `screens`

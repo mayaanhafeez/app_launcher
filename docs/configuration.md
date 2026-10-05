@@ -770,7 +770,6 @@ tint = {
   alpha = 0.15,        -- default 0.15 for color, 0.35 for monochrome
   blur = 0,            -- 0–1, a blur of whatever is behind the panel; 0 draws none
   screens = "panel",   -- "panel" (the display the panel is on) | "all"
-  fade = 0.12,         -- seconds; 0 appears instantly
 },
 -- shorthands: tint = "monochrome", tint = "color", tint = false
 ```
@@ -788,8 +787,8 @@ System Settings, macOS draws that material as a flat grey instead.
 
 Clicking the tint closes the launcher, and the click does not reach the app
 underneath. Under `screens = { ... }`, a display's `tint` is merged onto the
-global one, so `{ mode = "monochrome" }` there keeps the global `alpha`, `blur`
-and `fade`. Whether to tint at all — and `screens = "all"` — is decided by the
+global one, so `{ mode = "monochrome" }` there keeps the global `alpha` and
+`blur`. Whether to tint at all — and `screens = "all"` — is decided by the
 theme of the display the panel opens on; every other display is then washed in
 its own theme, and one that sets `tint = false` is left alone.
 

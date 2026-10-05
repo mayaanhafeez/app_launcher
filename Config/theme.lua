@@ -108,7 +108,6 @@ return {
   --   alpha = 0.15,         -- default 0.15 for color, 0.35 for monochrome
   --   blur = 0,             -- 0-1, blurs what is behind the panel
   --   screens = "panel",    -- "panel" | "all"
-  --   fade = 0.12,          -- seconds
   -- },
 
   -- Per-display overrides. Use the stable display ID printed by

@@ -75,7 +75,7 @@ private func loadThemeSet(_ source: String) -> (ThemeSet, () -> Void) {
 @Test func aDisplayOverrideMergesOntoTheGlobalTint() {
     let (themes, cleanup) = loadThemeSet("""
     return {
-      tint = { alpha = 0.2, blur = 0.5, fade = 0 },
+      tint = { alpha = 0.2, blur = 0.5 },
       screens = { main = { tint = { mode = "monochrome" } }, ["7"] = { tint = false } },
     }
     """)
@@ -84,7 +84,6 @@ private func loadThemeSet(_ source: String) -> (ThemeSet, () -> Void) {
     #expect(main.mode == .monochrome)
     #expect(main.resolvedAlpha == 0.2)
     #expect(main.blur == 0.5)
-    #expect(main.fade == 0)
     #expect(!themes.resolved(screenNumber: "7", localizedName: nil, isMain: false).theme.tint.enabled)
 }
 

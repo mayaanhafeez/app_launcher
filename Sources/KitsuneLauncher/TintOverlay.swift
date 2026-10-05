@@ -29,46 +29,21 @@ final class TintOverlay {
 
     var onClick: (() -> Void)?
     private var windows: [TintWindow] = []
-    /// Bumped by every `show` and `hide`, so a fade-out that finishes after the panel
-    /// was reopened does not order the fresh tint out from under it.
-    private var generation = 0
 
-    func show(_ targets: [Target], animated: Bool) {
-        generation += 1
-        guard !targets.isEmpty else { return hide(fade: 0) }
+    /// No fade in either direction: the tint arrives and leaves in the same frame as the
+    /// panel. A ramp read as the launcher being slow to open.
+    func show(_ targets: [Target]) {
+        guard !targets.isEmpty else { return hide() }
         while windows.count < targets.count { windows.append(makeWindow()) }
         for (window, target) in zip(windows, targets) {
             configure(window, for: target)
-            let wasVisible = window.isVisible
-            if !wasVisible { window.alphaValue = 0 }
             window.orderFrontRegardless()
-            fade(window, to: 1, duration: animated && !wasVisible ? target.theme.tint.fade : 0)
         }
         for window in windows.dropFirst(targets.count) { window.orderOut(nil) }
     }
 
-    func hide(fade duration: TimeInterval) {
-        generation += 1
-        let claim = generation
-        for window in windows where window.isVisible {
-            fade(window, to: 0, duration: duration) { [weak self, weak window] in
-                guard self?.generation == claim else { return }
-                window?.orderOut(nil)
-            }
-        }
-    }
-
-    private func fade(_ window: NSWindow, to alpha: CGFloat, duration: TimeInterval,
-                      completion: (@MainActor () -> Void)? = nil) {
-        guard duration > 0 else {
-            window.alphaValue = alpha
-            completion?()
-            return
-        }
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = duration
-            window.animator().alphaValue = alpha
-        }, completionHandler: completion.map { done in { MainActor.assumeIsolated { done() } } })
+    func hide() {
+        for window in windows where window.isVisible { window.orderOut(nil) }
     }
 
     private func makeWindow() -> TintWindow {
@@ -82,7 +57,7 @@ final class TintOverlay {
         window.backgroundColor = .clear
         window.isOpaque = false
         window.hasShadow = false
-        // The fade is driven by hand; AppKit's own would run on top of it.
+        // Left at `.default`, AppKit picks a fade for a window being ordered in.
         window.animationBehavior = .none
         window.isReleasedWhenClosed = false
 

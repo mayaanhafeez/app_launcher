@@ -214,7 +214,7 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
         updatePrompt()
         resizeToContent()
         // Before the panel, so the panel is ordered in over a tint that is already there.
-        showTint(animated: true)
+        showTint()
         panel.orderFrontRegardless()
         schedulePlacement()
         panel.makeKey()
@@ -229,7 +229,7 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
         refreshModeIndicator()
         updatePrompt()
         window?.orderOut(nil)
-        tint.hide(fade: theme.tint.fade)
+        tint.hide()
     }
 
     /// Re-anchor once the display geometry has settled — the single debounce both
@@ -256,7 +256,7 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
             self.resizeToContent()
             // The display set may have changed under the tint too: a new display needs
             // covering, a removed one leaves a window over geometry that no longer exists.
-            self.showTint(animated: false)
+            self.showTint()
             self.pendingScreenPlacement = nil
         }
         pendingScreenPlacement = placement
@@ -402,7 +402,7 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
     func apply(themes: ThemeSet) {
         self.themes = themes
         resolveTheme()
-        if window?.isVisible == true { showTint(animated: false) }
+        if window?.isVisible == true { showTint() }
     }
 
     private func applyResolved(_ theme: Theme) {
@@ -505,9 +505,9 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
     /// resolved theme is the one the user is looking at. Under `screens = "all"` every
     /// other display is then washed in its own resolved theme, so one that sets its own
     /// palette, or `tint = false`, keeps that.
-    private func showTint(animated: Bool) {
+    private func showTint() {
         let spec = theme.tint
-        guard spec.isVisible else { return tint.hide(fade: 0) }
+        guard spec.isVisible else { return tint.hide() }
         let screens = NSScreen.screens
         let panelIndex = panelScreenIndex(screens)
         var targets: [TintOverlay.Target] = []
@@ -519,7 +519,7 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
                 if own.tint.isVisible { targets.append(.init(frame: screen.frame, theme: own)) }
             }
         }
-        tint.show(targets, animated: animated)
+        tint.show(targets)
     }
 
     /// The card is content-sized like the omarchy menu: it shrinks to the rows it

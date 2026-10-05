@@ -350,8 +350,8 @@ The wash is a view *above* the behind-window `NSVisualEffectView`, not the conte
 its subviews and vanish at `blur = 1`. The material's radius is fixed, so `blur` is the effect view's alpha. `monochrome`
 is a black dim — real greyscale of other apps' pixels would need ScreenCaptureKit and Screen Recording. The tint is
 re-shown from `schedulePlacement` and from a theme reload, which is what re-covers a changed display set. A click on it
-calls `onDismiss` and is swallowed, so it does not land on the app underneath. Its fade is a `generation`-guarded
-animation, so a fade-out finishing after a reopen cannot order the new tint out.
+calls `onDismiss` and is swallowed, so it does not land on the app underneath. It appears and disappears with the panel,
+with no fade: a ramp in either direction read as the launcher being slow to open or close.
 
 ### Panel
 

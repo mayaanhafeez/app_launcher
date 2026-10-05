@@ -1014,8 +1014,6 @@ final class ThemeRuntime: @unchecked Sendable {
             if field("screens") == LUA_TSTRING, let value = luaString(state, -1),
                let screens = TintSpec.Screens(rawValue: value) { tint.screens = screens }
             pop()
-            if field("fade") == LUA_TNUMBER { tint.fade = min(1, max(0, lua_tonumberx(state, -1, nil))) }
-            pop()
         default:
             break
         }
