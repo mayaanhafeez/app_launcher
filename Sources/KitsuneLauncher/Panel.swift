@@ -48,6 +48,7 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
     private let notice = NSTextField(wrappingLabelWithString: "")
     private let modeLabel = NSTextField(labelWithString: "NORMAL")
     private let emptyLabel = NSTextField(labelWithString: "No matches")
+    private let tint = TintOverlay()
     private var rows: [DisplayRow] = []
     /// Where the pointer was, and what was focused, when the panel was last shown.
     private var anchorPointer = NSEvent.mouseLocation
@@ -116,9 +117,12 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
 
     init() {
         let panel = LauncherPanel(contentRect: NSRect(x: 0, y: 0, width: 380, height: 300), styleMask: [.nonactivatingPanel, .borderless, .fullSizeContentView], backing: .buffered, defer: false)
-        panel.level = .popUpMenu
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
         panel.isFloatingPanel = true
+        // After `isFloatingPanel`, which resets the level to `.floating` as a side effect:
+        // set first, the panel silently ran at `.floating` — level with the tint, which
+        // then drew over it whenever it was re-ordered front.
+        panel.level = .popUpMenu
         panel.hidesOnDeactivate = false
         panel.becomesKeyOnlyIfNeeded = false
         panel.isMovableByWindowBackground = true
@@ -133,6 +137,7 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
         panel.acceptsMouseMovedEvents = true
         super.init(window: panel)
         panel.delegate = self
+        tint.onClick = { [weak self] in self?.onDismiss?() }
         buildUI(panel)
         apply(theme: theme)
         installKeyMonitor()
@@ -208,6 +213,8 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
         refreshModeIndicator()
         updatePrompt()
         resizeToContent()
+        // Before the panel, so the panel is ordered in over a tint that is already there.
+        showTint(animated: true)
         panel.orderFrontRegardless()
         schedulePlacement()
         panel.makeKey()
@@ -222,6 +229,7 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
         refreshModeIndicator()
         updatePrompt()
         window?.orderOut(nil)
+        tint.hide(fade: theme.tint.fade)
     }
 
     /// Re-anchor once the display geometry has settled — the single debounce both
@@ -246,6 +254,9 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
             guard self.pendingScreenPlacement === placement else { return }
             self.captureAnchors()
             self.resizeToContent()
+            // The display set may have changed under the tint too: a new display needs
+            // covering, a removed one leaves a window over geometry that no longer exists.
+            self.showTint(animated: false)
             self.pendingScreenPlacement = nil
         }
         pendingScreenPlacement = placement
@@ -391,6 +402,7 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
     func apply(themes: ThemeSet) {
         self.themes = themes
         resolveTheme()
+        if window?.isVisible == true { showTint(animated: false) }
     }
 
     private func applyResolved(_ theme: Theme) {
@@ -474,13 +486,40 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
 
     private func resolveTheme() {
         let screens = NSScreen.screens
-        let index = PanelPlacement.screenIndex(themes.global.screen, screens: screens.map(\.frame),
-                                               pointer: anchorPointer, focusedWindow: anchorWindow)
+        let index = panelScreenIndex(screens)
         guard screens.indices.contains(index) else { return applyResolved(themes.global) }
-        let screen = screens[index]
+        applyResolved(theme(forScreen: screens[index], at: index))
+    }
+
+    private func panelScreenIndex(_ screens: [NSScreen]) -> Int {
+        PanelPlacement.screenIndex(themes.global.screen, screens: screens.map(\.frame),
+                                   pointer: anchorPointer, focusedWindow: anchorWindow)
+    }
+
+    private func theme(forScreen screen: NSScreen, at index: Int) -> Theme {
         let number = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.stringValue
-        let resolved = themes.resolved(screenNumber: number, localizedName: screen.localizedName, isMain: index == 0)
-        applyResolved(resolved.theme)
+        return themes.resolved(screenNumber: number, localizedName: screen.localizedName, isMain: index == 0).theme
+    }
+
+    /// Whether to tint, and over which displays, is the *panel's* display's call — its
+    /// resolved theme is the one the user is looking at. Under `screens = "all"` every
+    /// other display is then washed in its own resolved theme, so one that sets its own
+    /// palette, or `tint = false`, keeps that.
+    private func showTint(animated: Bool) {
+        let spec = theme.tint
+        guard spec.isVisible else { return tint.hide(fade: 0) }
+        let screens = NSScreen.screens
+        let panelIndex = panelScreenIndex(screens)
+        var targets: [TintOverlay.Target] = []
+        for (index, screen) in screens.enumerated() {
+            if index == panelIndex {
+                targets.append(.init(frame: screen.frame, theme: theme))
+            } else if spec.screens == .all {
+                let own = theme(forScreen: screen, at: index)
+                if own.tint.isVisible { targets.append(.init(frame: screen.frame, theme: own)) }
+            }
+        }
+        tint.show(targets, animated: animated)
     }
 
     /// The card is content-sized like the omarchy menu: it shrinks to the rows it

@@ -759,6 +759,40 @@ palette-seeded value in place rather than overriding it.
 Weight names accepted by `label_weight`/`detail_weight`: `ultralight`, `thin`,
 `light`, `regular`/`normal`, `medium`, `semibold`, `bold`, `heavy`, `black`.
 
+### Screen tint
+
+`tint` washes the screen behind the panel while it is open. It is off unless set.
+
+```lua
+tint = {
+  mode = "color",      -- "color" | "monochrome"
+  color = "bg",        -- color mode only: a role (bg, surface, fg, fg_muted, accent, border) or a hex value
+  alpha = 0.15,        -- default 0.15 for color, 0.35 for monochrome
+  blur = 0,            -- 0–1, a blur of whatever is behind the panel; 0 draws none
+  screens = "panel",   -- "panel" (the display the panel is on) | "all"
+  fade = 0.12,         -- seconds; 0 appears instantly
+},
+-- shorthands: tint = "monochrome", tint = "color", tint = false
+```
+
+A table turns the tint on unless it says `enabled = false`. `color` names a
+**role**, resolved against each display's own theme, so it follows `palette`
+(including `"auto"`) and a display in `screens = { ... }` with its own palette
+is tinted in that palette. `monochrome` is a neutral black dim that ignores the
+palette — not a greyscale filter, which would need Screen Recording permission.
+
+`blur` blurs other apps' windows without a capture, using a behind-window
+material; the material's radius is fixed, so the value is how much of the
+blurred screen shows through. With **Reduce transparency** switched on in
+System Settings, macOS draws that material as a flat grey instead.
+
+Clicking the tint closes the launcher, and the click does not reach the app
+underneath. Under `screens = { ... }`, a display's `tint` is merged onto the
+global one, so `{ mode = "monochrome" }` there keeps the global `alpha`, `blur`
+and `fade`. Whether to tint at all — and `screens = "all"` — is decided by the
+theme of the display the panel opens on; every other display is then washed in
+its own theme, and one that sets `tint = false` is left alone.
+
 ### Rescaling the panel
 
 `font_size` drives a proportional type scale rather than being one of many

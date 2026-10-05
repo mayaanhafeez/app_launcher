@@ -337,6 +337,22 @@ low-alpha wash plus accent-tinted text, not an inverted accent slab.
 explicit keys always win. The shipped `Config/theme.lua` therefore keeps its colour overrides
 commented out; uncommenting them all makes `palette` inert.
 
+### Screen tint
+
+`TintOverlay` (`TintOverlay.swift`) is one borderless window per tinted display, one level under the panel
+(`.popUpMenu - 1`), that never becomes key — a tint that took key would resign the panel's, which is the panel's cue to
+dismiss. `TintSpec` lives on `Theme`, not `Settings`, because it is appearance: it reloads with the theme and merges per
+display in `screens`. Its colour is held as a **role** and resolved per display at draw time
+(`resolvedColor(in:)`), so a display with its own palette is tinted in that palette. The panel's display decides whether
+to tint and whether `screens = "all"`; every other display is then drawn from its own resolved theme.
+
+The wash is a view *above* the behind-window `NSVisualEffectView`, not the content view's layer, which would sit under
+its subviews and vanish at `blur = 1`. The material's radius is fixed, so `blur` is the effect view's alpha. `monochrome`
+is a black dim — real greyscale of other apps' pixels would need ScreenCaptureKit and Screen Recording. The tint is
+re-shown from `schedulePlacement` and from a theme reload, which is what re-covers a changed display set. A click on it
+calls `onDismiss` and is swallowed, so it does not land on the app underneath. Its fade is a `generation`-guarded
+animation, so a fade-out finishing after a reopen cannot order the new tint out.
+
 ### Panel
 
 `PanelController` drives a borderless `.nonactivatingPanel` at `.popUpMenu` level — it takes key focus without
