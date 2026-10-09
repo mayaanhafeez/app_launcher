@@ -41,11 +41,25 @@ final class AppIndex: NSObject {
     /// Roots every scan covers before `apps.paths` is added. Injectable so a test can
     /// scan a temporary directory rather than the machine's `/Applications`.
     private let baseRoots: [URL]
+    /// Re-scans when an app lands in, leaves or is renamed under a scanned root. The
+    /// index used to be built at launch and on a changed `apps` spec only, so anything
+    /// installed while the launcher was resident could only be found through Spotlight.
+    private var watcher: AppRootWatcher?
+    private var pendingWatchRescan: DispatchWorkItem?
+    /// FSEvents already coalesces for `AppRootWatcher.latency`; this waits for the
+    /// burst to end. A drag-installed app arrives as a long copy, and a scan per batch
+    /// of it would re-read every bundle on disk each time.
+    private let watchDebounce: TimeInterval
 
-    init(baseRoots: [URL] = AppIndex.defaultRoots) {
+    init(baseRoots: [URL] = AppIndex.defaultRoots, watchDebounce: TimeInterval = 1.0) {
         self.baseRoots = baseRoots
+        self.watchDebounce = watchDebounce
         super.init()
     }
+
+    /// The stream retains its watcher, so dropping the reference alone would leave it
+    /// running for the life of the process.
+    deinit { watcher?.stop() }
 
     /// Republished on every config reload; a changed set of roots re-scans.
     func apply(scan: AppScanSpec) {
@@ -69,6 +83,7 @@ final class AppIndex: NSObject {
         let generation = scanGeneration
         let roots = baseRoots + scanSpec.paths.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
         let depth = scanSpec.depth
+        watch(roots: roots, depth: depth)
         let points = iconPoints
         worker.async { [weak self] in
             let built = Self.appPaths(in: roots, depth: depth)
@@ -79,6 +94,31 @@ final class AppIndex: NSObject {
                 self.replace(built)
             }
         }
+    }
+
+    /// Re-armed only when the roots or depth change — every scan passes through here,
+    /// including the ones the watcher itself triggers.
+    private func watch(roots: [URL], depth: Int) {
+        let paths = roots.map(\.path)
+        if let watcher, watcher.roots == paths, watcher.depth == depth { return }
+        watcher?.stop()
+        let watcher = AppRootWatcher(roots: paths, depth: depth) { [weak self] in
+            Task { @MainActor [weak self] in self?.scheduleWatchRescan() }
+        }
+        watcher.start()
+        self.watcher = watcher
+    }
+
+    private func scheduleWatchRescan() {
+        pendingWatchRescan?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                self?.pendingWatchRescan = nil
+                self?.rescan()
+            }
+        }
+        pendingWatchRescan = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + watchDebounce, execute: work)
     }
 
     /// Every `.app` at most `depth` components below one of `roots`. Packages are
@@ -302,5 +342,115 @@ final class AppIndex: NSObject {
         return !components[..<appIndex].contains(where: { $0.hasSuffix(".app") })
             && !path.contains("/Library/Developer/")
             && !path.contains("/.Trash/")
+    }
+}
+
+/// An FSEvents stream over the scan roots. FSEvents rather than the vnode sources
+/// `ConfigWatcher` uses: it is recursive for one descriptor-free stream, which matters
+/// because an app can live up to `apps.depth` folders down, and a vnode watch per
+/// directory under `/Applications` would be hundreds of descriptors.
+///
+/// File-level events, filtered by `isRelevant`: a stream over `/Applications` also
+/// hears every write *inside* every bundle there — an app updating its own resources,
+/// Finder touching `.DS_Store` — and none of those change what is installed.
+final class AppRootWatcher: @unchecked Sendable {
+    nonisolated static let latency: CFTimeInterval = 0.5
+
+    let roots: [String]
+    let depth: Int
+    private let onChange: @Sendable () -> Void
+    /// The roots as FSEvents reports them. It hands back real paths, so a root reached
+    /// through a symlink (`/tmp` is `/private/tmp`) would otherwise match nothing.
+    private let resolvedRoots: [String]
+    private let queue = DispatchQueue(label: "kitsune.app-watch", qos: .utility)
+    private var stream: FSEventStreamRef?
+
+    init(roots: [String], depth: Int, onChange: @escaping @Sendable () -> Void) {
+        self.roots = roots
+        self.depth = depth
+        self.onChange = onChange
+        resolvedRoots = roots.map { path in
+            guard let real = realpath(path, nil) else { return path }
+            defer { free(real) }
+            return String(cString: real)
+        }
+    }
+
+    deinit { stop() }
+
+    func start() {
+        guard stream == nil else { return }
+        // The stream retains the watcher for as long as it can call back into it, so a
+        // callback already queued when `stop()` runs never reaches a freed object.
+        var context = FSEventStreamContext(
+            version: 0,
+            info: Unmanaged.passUnretained(self).toOpaque(),
+            retain: { info in
+                guard let info else { return nil }
+                _ = Unmanaged<AppRootWatcher>.fromOpaque(info).retain()
+                return UnsafeRawPointer(info)
+            },
+            release: { info in
+                guard let info else { return }
+                Unmanaged<AppRootWatcher>.fromOpaque(info).release()
+            },
+            copyDescription: nil
+        )
+        let callback: FSEventStreamCallback = { _, info, count, paths, flags, _ in
+            guard let info else { return }
+            let watcher = Unmanaged<AppRootWatcher>.fromOpaque(info).takeUnretainedValue()
+            guard let paths = unsafeBitCast(paths, to: NSArray.self) as? [String] else { return }
+            for index in 0..<count where AppRootWatcher.isRelevant(
+                path: paths[index], flags: flags[index], roots: watcher.resolvedRoots, depth: watcher.depth
+            ) {
+                watcher.onChange()
+                return
+            }
+        }
+        guard let stream = FSEventStreamCreate(
+            nil, callback, &context, resolvedRoots as CFArray,
+            FSEventStreamEventId(kFSEventStreamEventIdSinceNow), Self.latency,
+            FSEventStreamCreateFlags(kFSEventStreamCreateFlagUseCFTypes | kFSEventStreamCreateFlagFileEvents
+                | kFSEventStreamCreateFlagWatchRoot)
+        ) else { return }
+        FSEventStreamSetDispatchQueue(stream, queue)
+        guard FSEventStreamStart(stream) else {
+            FSEventStreamInvalidate(stream)
+            FSEventStreamRelease(stream)
+            return
+        }
+        self.stream = stream
+    }
+
+    func stop() {
+        guard let stream else { return }
+        self.stream = nil
+        FSEventStreamStop(stream)
+        FSEventStreamInvalidate(stream)
+        FSEventStreamRelease(stream)
+    }
+
+    /// Whether an event at `path` can change what a scan returns. Mirrors `appPaths`:
+    /// hidden entries are skipped, nothing below a bundle's top level is an app, and
+    /// nothing at or past `depth` is walked. Inside a bundle only the bundle itself,
+    /// its `Contents` and its `Info.plist` count — a drag install writes the plist
+    /// after the bundle directory appears, and the name the index shows comes from it.
+    nonisolated static func isRelevant(path: String, flags: FSEventStreamEventFlags, roots: [String], depth: Int) -> Bool {
+        let rescan = kFSEventStreamEventFlagMustScanSubDirs | kFSEventStreamEventFlagRootChanged
+            | kFSEventStreamEventFlagUserDropped | kFSEventStreamEventFlagKernelDropped
+        if flags & FSEventStreamEventFlags(rescan) != 0 { return true }
+
+        guard let root = roots.first(where: { path == $0 || path.hasPrefix($0.hasSuffix("/") ? $0 : $0 + "/") })
+        else { return false }
+        let relative = path.dropFirst(root.count).split(separator: "/")
+        if relative.isEmpty { return true }
+        if relative.contains(where: { $0.hasPrefix(".") }) { return false }
+        if let bundle = relative.firstIndex(where: { $0.lowercased().hasSuffix(".app") }) {
+            guard bundle < depth else { return false }
+            let inside = relative[(bundle + 1)...].map(String.init)
+            return inside.isEmpty || inside == ["Contents"] || inside == ["Contents", "Info.plist"]
+        }
+        // A folder that could hold an app: renaming or removing it moves every app below.
+        return relative.count < depth
     }
 }
