@@ -130,7 +130,13 @@ final class MenuController {
             case .failure(let error): self?.onNotice?(error.localizedDescription)
             }
         }
-        appIndex.onChange = { [weak self] in self?.refresh(query: "") }
+        // The current query, not "": a scan now lands whenever the app folders change,
+        // which can be mid-search, and clearing it here would leave the field showing
+        // text the list no longer reflects.
+        appIndex.onChange = { [weak self] in
+            guard let self else { return }
+            refresh(query: query)
+        }
     }
 
     func open(route: String = "root") {
