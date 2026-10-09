@@ -225,6 +225,16 @@ spec changed, so an unrelated save costs nothing. `apps.depth` (3 by default) ca
 user root like `~/dev` can be enormous; 3 covers every built-in root, down to `~/Applications/CrossOver/Steam/Steam.app`.
 Packages are returned but never descended into, so an app's bundled helper apps stay out of the list.
 
+The roots are **watched**, so an app installed or removed while the launcher is resident shows up without a reload —
+before this it could only be found through Spotlight. `AppRootWatcher` is one FSEvents stream over every root rather
+than `ConfigWatcher`'s vnode sources, because an app can sit `apps.depth` folders down and a descriptor per directory
+under `/Applications` is hundreds of them. It asks for file-level events and `isRelevant` filters them the way
+`appPaths` walks: hidden entries, anything deeper than a bundle's `Contents/Info.plist`, and anything past `depth` are
+ignored, so an app writing into its own bundle or Finder touching `.DS_Store` costs nothing. A relevant batch re-scans
+after a 1s trailing debounce, which a long drag-install copy needs. The stream is re-armed only when the roots or depth
+change, and it retains the watcher through its context, so `stop()` has to be called explicitly — `AppIndex.deinit`
+does. A scan landing mid-search refreshes with the current query, not `""`, or the field and the list would disagree.
+
 Icons are the index's entire memory cost — `NSWorkspace.icon(forFile:)` returns a multi-representation image sized for
 the Finder and the index holds one per app for the process lifetime. `thumbnail(for:)` flattens each to a single 2x
 bitmap at `thumbnailSize` (36pt, covering `Theme.iconSlot`), so an icon costs a fixed ~21KB
