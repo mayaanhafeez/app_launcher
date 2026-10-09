@@ -99,6 +99,18 @@ return {
   detail_weight = "regular",
   detail_mode = "search", -- "search" | "always" | "never"
 
+  -- Screen tint behind the panel while it is open. Off unless set; `tint = false`
+  -- turns it off again, and `tint = "monochrome"` is shorthand for the mode alone.
+  -- tint = {
+  --   mode = "color",       -- "color" | "monochrome" (a neutral black dim)
+  --   color = "bg",         -- a role (bg surface fg fg_muted accent border) or a hex
+  --                         -- value; a role follows the palette above
+  --   alpha = 0.15,         -- default 0.15 for color, 0.35 for monochrome
+  --   blur = 0,             -- 0-1, blurs what is behind the panel
+  --   screens = "panel",    -- "panel" | "all"
+  --   fade = 0.12,          -- seconds
+  -- },
+
   -- Per-display overrides. Use the stable display ID printed by
   -- `system_profiler SPDisplaysDataType`, the display name, or "main". Only the
   -- values present here replace the global values above, and `palette` may select a

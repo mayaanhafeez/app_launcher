@@ -970,6 +970,55 @@ final class ThemeRuntime: @unchecked Sendable {
         if let value = string("detail_mode"), ["search", "always", "never"].contains(value) { theme.detailMode = value }
         if let value = string("label_weight"), let weight = Theme.weight(named: value) { theme.labelWeight = weight }
         if let value = string("detail_weight"), let weight = Theme.weight(named: value) { theme.detailWeight = weight }
+
+        lua_getfield(state, -1, "tint")
+        theme.tint = Self.decodeTint(state, base: theme.tint)
+        lua_settop(state, -2)
         return (theme, resolvedPaletteName)
+    }
+
+    /// Reads the value on top of the stack onto `base`, so a display in `screens` that
+    /// sets only `tint = { mode = "monochrome" }` keeps the global tint's other keys.
+    /// `false` switches it off, a mode name is shorthand for `{ mode = ... }`, and a
+    /// table switches it on unless it says `enabled = false`. An unknown mode, role or
+    /// colour leaves the inherited value standing, as every other theme key does.
+    static func decodeTint(_ state: OpaquePointer, base: TintSpec) -> TintSpec {
+        var tint = base
+        switch lua_type(state, -1) {
+        case LUA_TBOOLEAN:
+            tint.enabled = lua_toboolean(state, -1) != 0
+        case LUA_TSTRING:
+            if let value = luaString(state, -1), let mode = TintSpec.Mode(rawValue: value) {
+                tint.enabled = true
+                tint.mode = mode
+            }
+        case LUA_TTABLE:
+            func field(_ key: String) -> Int32 { lua_getfield(state, -1, key) }
+            func pop() { lua_settop(state, -2) }
+            tint.enabled = true
+            if field("enabled") == LUA_TBOOLEAN { tint.enabled = lua_toboolean(state, -1) != 0 }
+            pop()
+            if field("mode") == LUA_TSTRING, let value = luaString(state, -1),
+               let mode = TintSpec.Mode(rawValue: value) { tint.mode = mode }
+            pop()
+            // A role name wins over a colour parse, so `color = "bg"` is never read as hex.
+            if field("color") == LUA_TSTRING, let value = luaString(state, -1) {
+                if TintSpec.roles.contains(value) { tint.color = .role(value) }
+                else if let parsed = Palette.color(from: value) { tint.color = .fixed(parsed) }
+            }
+            pop()
+            if field("alpha") == LUA_TNUMBER { tint.alpha = min(1, max(0, lua_tonumberx(state, -1, nil))) }
+            pop()
+            if field("blur") == LUA_TNUMBER { tint.blur = min(1, max(0, lua_tonumberx(state, -1, nil))) }
+            pop()
+            if field("screens") == LUA_TSTRING, let value = luaString(state, -1),
+               let screens = TintSpec.Screens(rawValue: value) { tint.screens = screens }
+            pop()
+            if field("fade") == LUA_TNUMBER { tint.fade = min(1, max(0, lua_tonumberx(state, -1, nil))) }
+            pop()
+        default:
+            break
+        }
+        return tint
     }
 }

@@ -573,6 +573,66 @@ enum PanelScreenChoice: String, Sendable, CaseIterable {
     case active
 }
 
+/// The wash drawn over the screen behind the panel while it is open. Off unless
+/// `theme.lua` sets `tint`.
+///
+/// The colour is held as a *role* rather than a resolved `NSColor` because a display in
+/// `screens = { ... }` can pick its own palette: resolving at decode time would fix the
+/// global palette's `bg` onto every display, where resolving against each display's
+/// theme tints that display in its own scheme.
+struct TintSpec: Sendable, Equatable {
+    enum Mode: String, Sendable, CaseIterable {
+        /// A palette role or a fixed colour — `bg` by default, so it dims in the
+        /// theme's own tone.
+        case color
+        /// A neutral black wash that ignores the palette. A real greyscale of what is
+        /// behind the panel would need Screen Recording, so this is a dim, not a filter.
+        case monochrome
+    }
+
+    enum Color: Sendable, Equatable {
+        case role(String)
+        case fixed(NSColor)
+    }
+
+    enum Screens: String, Sendable, CaseIterable {
+        /// Only the display the panel landed on.
+        case panel
+        case all
+    }
+
+    /// The roles `color` may name — the same names `theme.lua` sets them by.
+    static let roles = ["bg", "surface", "fg", "fg_muted", "accent", "border"]
+
+    var enabled = false
+    var mode: Mode = .color
+    var color: Color = .role("bg")
+    /// Nil means the mode's default, so switching a display to `monochrome` picks up the
+    /// heavier alpha a black wash needs rather than inheriting the colour wash's.
+    var alpha: CGFloat? = nil
+    /// 0...1, the opacity of a behind-window blur under the wash. 0 draws no effect view.
+    var blur: CGFloat = 0
+    var screens: Screens = .panel
+    var fade: TimeInterval = 0.12
+
+    var resolvedAlpha: CGFloat { alpha ?? (mode == .monochrome ? 0.35 : 0.15) }
+
+    /// The wash colour against one display's theme, alpha already applied.
+    func resolvedColor(in theme: Theme) -> NSColor {
+        let base: NSColor
+        switch (mode, color) {
+        case (.monochrome, _): base = .black
+        case let (.color, .fixed(value)): base = value
+        case let (.color, .role(name)): base = theme.color(role: name) ?? theme.bg
+        }
+        return base.withAlphaComponent(resolvedAlpha)
+    }
+
+    /// Whether the overlay has anything to draw: a tint at zero alpha with no blur is
+    /// switched on in name only, and is not worth a window per display.
+    var isVisible: Bool { enabled && (resolvedAlpha > 0 || blur > 0) }
+}
+
 /// The panel's geometry, resolved without touching AppKit: the caller supplies the
 /// visible frame, the pointer and the focused window, so every anchor and every
 /// clamp is testable without a screen.
@@ -739,6 +799,10 @@ struct Theme: Sendable {
     var detailMode = "search"
     var labelWeight: NSFont.Weight = .medium
     var detailWeight: NSFont.Weight = .regular
+
+    /// The screen tint behind the panel. Lives here rather than on `Settings` because it
+    /// is appearance: it reloads with the theme and a display in `screens` can override it.
+    var tint = TintSpec()
 }
 
 struct ScreenTheme: Sendable {
@@ -778,6 +842,20 @@ extension Theme {
     var titleSize: CGFloat { scaled(1.167) }
     var headingSize: CGFloat { scaled(1.333) }
     var iconSize: CGFloat { scaled(1.5) }
+
+    /// A colour role by the name `theme.lua` sets it with, for the tokens — like
+    /// `tint.color` — that refer to a role rather than carry a colour of their own.
+    func color(role: String) -> NSColor? {
+        switch role {
+        case "bg": bg
+        case "surface": surface
+        case "fg": fg
+        case "fg_muted": fgMuted
+        case "accent": accent
+        case "border": border
+        default: nil
+        }
+    }
 
     var selectionFill: NSColor { (selectionBg ?? fg).withAlphaComponent(selectionAlpha) }
     var selectionText: NSColor { selectionFg ?? accent }

@@ -44,7 +44,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // the built-in fallback menu.
         ConfigSeeder.seed(from: ConfigSeeder.bundledTemplates, to: configDirectory)
         reloadAll()
-        appIndex.start()
         let hotKey = GlobalHotKey()
         hotKey.action = { [weak self] target in self?.trigger(target) }
         hotKey.register([HotKeySpec()])
@@ -99,9 +98,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.onDismiss = { [weak self] in self?.dismiss() }
     }
 
+    /// The explicit reload, and the first load at launch. Unlike a watched save, it
+    /// re-scans the apps even when `apps` is unchanged — that is what a user asking for
+    /// a reload after installing something expects. A spec the load does change scans
+    /// again from `onSettings`, and the generation guard drops this one.
     private func reloadAll() {
         runtime.load(file: configDirectory.appendingPathComponent("config.lua"))
         reloadTheme()
+        appIndex.refresh()
     }
 
     /// The one place the config error state changes: a failure is held and shown in

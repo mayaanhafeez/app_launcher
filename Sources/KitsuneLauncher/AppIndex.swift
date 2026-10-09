@@ -33,7 +33,19 @@ final class AppIndex: NSObject {
         ]
     }
 
-    func start() { rescan() }
+    /// An explicit reload — `kitsunectl reload`, Reload Config — always re-scans.
+    /// `apply(scan:)` only does when the spec changed, so without this an app installed
+    /// after launch was unreachable short of restarting the launcher.
+    func refresh() { rescan() }
+
+    /// Roots every scan covers before `apps.paths` is added. Injectable so a test can
+    /// scan a temporary directory rather than the machine's `/Applications`.
+    private let baseRoots: [URL]
+
+    init(baseRoots: [URL] = AppIndex.defaultRoots) {
+        self.baseRoots = baseRoots
+        super.init()
+    }
 
     /// Republished on every config reload; a changed set of roots re-scans.
     func apply(scan: AppScanSpec) {
@@ -55,7 +67,7 @@ final class AppIndex: NSObject {
     private func rescan() {
         scanGeneration += 1
         let generation = scanGeneration
-        let roots = Self.defaultRoots + scanSpec.paths.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
+        let roots = baseRoots + scanSpec.paths.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
         let depth = scanSpec.depth
         let points = iconPoints
         worker.async { [weak self] in

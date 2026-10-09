@@ -219,7 +219,9 @@ and walking that would watch every dotfile directory the user owns.
 
 `AppIndex` scans `/Applications`, `/System/Applications` and `~/Applications`, plus whatever `apps.paths` adds, and a
 scan **replaces** the index rather than merging into it — dropping a path from the config, or deleting an app, has to
-remove those rows on the next reload. `apps.depth` (3 by default) caps how far below a root the walk goes, because a
+remove those rows on the next reload. An explicit reload (`kitsunectl reload`, Reload Config) always re-scans through
+`refresh()`, while `apply(scan:)` — reached from every settings publish, watched saves included — only re-scans when the
+spec changed, so an unrelated save costs nothing. `apps.depth` (3 by default) caps how far below a root the walk goes, because a
 user root like `~/dev` can be enormous; 3 covers every built-in root, down to `~/Applications/CrossOver/Steam/Steam.app`.
 Packages are returned but never descended into, so an app's bundled helper apps stay out of the list.
 
@@ -336,6 +338,22 @@ low-alpha wash plus accent-tinted text, not an inverted accent slab.
 `ThemeRuntime` seeds palette-derived roles *first*, then applies explicit `theme.lua` keys, so
 explicit keys always win. The shipped `Config/theme.lua` therefore keeps its colour overrides
 commented out; uncommenting them all makes `palette` inert.
+
+### Screen tint
+
+`TintOverlay` (`TintOverlay.swift`) is one borderless window per tinted display, one level under the panel
+(`.popUpMenu - 1`), that never becomes key — a tint that took key would resign the panel's, which is the panel's cue to
+dismiss. `TintSpec` lives on `Theme`, not `Settings`, because it is appearance: it reloads with the theme and merges per
+display in `screens`. Its colour is held as a **role** and resolved per display at draw time
+(`resolvedColor(in:)`), so a display with its own palette is tinted in that palette. The panel's display decides whether
+to tint and whether `screens = "all"`; every other display is then drawn from its own resolved theme.
+
+The wash is a view *above* the behind-window `NSVisualEffectView`, not the content view's layer, which would sit under
+its subviews and vanish at `blur = 1`. The material's radius is fixed, so `blur` is the effect view's alpha. `monochrome`
+is a black dim — real greyscale of other apps' pixels would need ScreenCaptureKit and Screen Recording. The tint is
+re-shown from `schedulePlacement` and from a theme reload, which is what re-covers a changed display set. A click on it
+calls `onDismiss` and is swallowed, so it does not land on the app underneath. Its fade is a `generation`-guarded
+animation, so a fade-out finishing after a reopen cannot order the new tint out.
 
 ### Panel
 
