@@ -219,7 +219,9 @@ and walking that would watch every dotfile directory the user owns.
 
 `AppIndex` scans `/Applications`, `/System/Applications` and `~/Applications`, plus whatever `apps.paths` adds, and a
 scan **replaces** the index rather than merging into it — dropping a path from the config, or deleting an app, has to
-remove those rows on the next reload. `apps.depth` (3 by default) caps how far below a root the walk goes, because a
+remove those rows on the next reload. An explicit reload (`kitsunectl reload`, Reload Config) always re-scans through
+`refresh()`, while `apply(scan:)` — reached from every settings publish, watched saves included — only re-scans when the
+spec changed, so an unrelated save costs nothing. `apps.depth` (3 by default) caps how far below a root the walk goes, because a
 user root like `~/dev` can be enormous; 3 covers every built-in root, down to `~/Applications/CrossOver/Steam/Steam.app`.
 Packages are returned but never descended into, so an app's bundled helper apps stay out of the list.
 
