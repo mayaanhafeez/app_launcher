@@ -96,7 +96,7 @@ private func benchNodes(count: Int) -> [MenuNode] {
 @MainActor
 @Test(.enabled(if: benchmarksEnabled)) func benchmarkAppResultsIconCost() async {
     let index = AppIndex()
-    index.start()
+    index.refresh()
     let ready = Locked<Bool>(false)
     index.onChange = { ready.value = true }
     _ = await kitsuneWaitUntil(timeout: 30) { ready.value }
