@@ -228,7 +228,8 @@ The walk runs over each root's **real** path and reports under the root as writt
 for a root that is itself a symlink, and real paths for one beneath a link. A `.app` without a parseable
 `Contents/Info.plist` is not an entry (`makeEntry` returns nil) — a drag install is caught mid-copy by the watcher, and
 an empty bundle left by a failed copy was listed outright — except iOS apps on Apple Silicon, which have no `Contents`
-and are recognised by `WrappedBundle`.
+and are read through their `WrappedBundle` link instead. The written root is `root.path`, not a standardized one, which
+would turn `/private/tmp` into `/tmp`.
 
 The roots are **watched**, so an app installed or removed while the launcher is resident shows up without a reload —
 before this it could only be found through Spotlight. `AppRootWatcher` is one FSEvents stream over every root rather

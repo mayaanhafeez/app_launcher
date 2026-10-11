@@ -132,7 +132,9 @@ final class AppIndex: NSObject {
     nonisolated static func appPaths(in roots: [URL], depth: Int) -> [String] {
         var paths = Set<String>()
         for root in roots {
-            let written = root.standardizedFileURL.path
+            // `.path`, not a standardized one: standardizing drops `/private` from
+            // `/private/tmp`, which is not the path the config wrote either.
+            let written = root.path
             let real = AppRootWatcher.resolve(written)
             guard let enumerator = FileManager.default.enumerator(
                 at: URL(fileURLWithPath: real, isDirectory: true),
@@ -240,11 +242,8 @@ final class AppIndex: NSObject {
         // install creates the directory long before it writes the plist, and the
         // watcher re-scans mid-copy, so the row appeared under its file name and was
         // renamed a scan later; an empty `.app` left by a failed copy was listed
-        // outright. Launch Services will not open one either. iOS apps on Apple Silicon
-        // are the exception: no `Contents` at all, the bundle is behind `WrappedBundle`.
-        guard !info.isEmpty
-            || FileManager.default.fileExists(atPath: url.appendingPathComponent("WrappedBundle").path)
-        else { return nil }
+        // outright. Launch Services will not open one either.
+        guard !info.isEmpty else { return nil }
         let strings = localizedStrings(at: url)
         let localized = localizedName(of: url)
         // Same precedence `Bundle.object(forInfoDictionaryKey:)` uses: a localized
@@ -273,8 +272,13 @@ final class AppIndex: NSObject {
 
     /// The bundle's Info.plist as a plain dictionary, retained by nobody. Handles the
     /// binary format as well as XML, which `PropertyListSerialization` does for free.
+    /// An iOS app on Apple Silicon has no `Contents`: its own bundle sits behind the
+    /// `WrappedBundle` link, with the plist at its top level as iOS lays it out.
     nonisolated private static func infoPlist(at url: URL) -> [String: Any] {
-        guard let data = try? Data(contentsOf: url.appendingPathComponent("Contents/Info.plist")),
+        let mac = url.appendingPathComponent("Contents/Info.plist")
+        let wrapped = url.appendingPathComponent("WrappedBundle/Info.plist")
+        let file = FileManager.default.fileExists(atPath: mac.path) ? mac : wrapped
+        guard let data = try? Data(contentsOf: file),
               let plist = try? PropertyListSerialization.propertyList(from: data, format: nil),
               let dictionary = plist as? [String: Any] else { return [:] }
         return dictionary
@@ -479,6 +483,7 @@ final class AppRootWatcher: @unchecked Sendable {
             guard bundle < depth else { return false }
             let inside = relative[(bundle + 1)...].map(String.init)
             return inside.isEmpty || inside == ["Contents"] || inside == ["Contents", "Info.plist"]
+                || inside == ["WrappedBundle"]
         }
         // A folder that could hold an app: renaming or removing it moves every app below.
         return relative.count < depth

@@ -169,9 +169,17 @@ private func relevant(_ path: String, depth: Int = 3, flags: Int = 0) -> Bool {
     let app = root.appendingPathComponent("Phone.app")
     let inner = app.appendingPathComponent("Wrapper/Phone.app")
     try FileManager.default.createDirectory(at: inner, withIntermediateDirectories: true)
+    let plist: [String: Any] = ["CFBundleDisplayName": "My Phone", "CFBundleIdentifier": "test.kitsune.phone"]
+    try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        .write(to: inner.appendingPathComponent("Info.plist"))
     try FileManager.default.createSymbolicLink(atPath: app.appendingPathComponent("WrappedBundle").path,
                                                withDestinationPath: "Wrapper/Phone.app")
-    #expect(AppIndex.entryForAudit(path: app.path)?.name == "Phone")
+    // Named and identified from the wrapped bundle's own plist, not the folder name.
+    let entry = AppIndex.entryForAudit(path: app.path)
+    #expect(entry?.name == "My Phone")
+    #expect(entry?.id == "test.kitsune.phone")
+    // The link can land after the directory; that has to re-scan like a plist write.
+    #expect(relevant("/Applications/Phone.app/WrappedBundle"))
 }
 
 @Test func appsUnderASymlinkedRootKeepThePathTheConfigWrote() throws {
@@ -187,4 +195,7 @@ private func relevant(_ path: String, depth: Int = 3, flags: Int = 0) -> Bool {
     #expect(AppIndex.appPaths(in: [link.appendingPathComponent("Apps")], depth: 3)
         == [link.appendingPathComponent("Apps/Inside.app").path])
     #expect(AppIndex.appPaths(in: [link], depth: 3) == [link.appendingPathComponent("Apps/Inside.app").path])
+    // Standardizing would have reported a `/private/tmp` root as `/tmp`.
+    let spelled = URL(fileURLWithPath: AppRootWatcher.resolve(link.path))
+    #expect(AppIndex.appPaths(in: [spelled], depth: 3) == [spelled.appendingPathComponent("Apps/Inside.app").path])
 }
