@@ -369,14 +369,26 @@ final class AppRootWatcher: @unchecked Sendable {
         self.roots = roots
         self.depth = depth
         self.onChange = onChange
-        resolvedRoots = roots.map { path in
-            guard let real = realpath(path, nil) else { return path }
-            defer { free(real) }
-            return String(cString: real)
-        }
+        resolvedRoots = roots.map(Self.resolve)
     }
 
-    deinit { stop() }
+    /// `path` with symlinks resolved as FSEvents will report it. A root that does not
+    /// exist yet has no real path, so the nearest existing ancestor is resolved and the
+    /// missing tail re-appended — keeping it as written would leave a root under a
+    /// symlinked directory matching nothing once it is created.
+    nonisolated static func resolve(_ path: String) -> String {
+        var existing = (path as NSString).standardizingPath
+        var missing: [String] = []
+        while existing.count > 1 {
+            if let real = realpath(existing, nil) {
+                defer { free(real) }
+                return missing.reversed().reduce(String(cString: real)) { ($0 as NSString).appendingPathComponent($1) }
+            }
+            missing.append((existing as NSString).lastPathComponent)
+            existing = (existing as NSString).deletingLastPathComponent
+        }
+        return path
+    }
 
     func start() {
         guard stream == nil else { return }

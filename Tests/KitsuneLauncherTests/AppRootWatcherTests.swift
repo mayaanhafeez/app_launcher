@@ -130,3 +130,16 @@ private func relevant(_ path: String, depth: Int = 3, flags: Int = 0) -> Bool {
     try makeApp("Late", in: root)
     #expect(await waitForApps(index) { $0 == ["Late"] })
 }
+
+@Test func aMissingRootUnderASymlinkResolvesThroughItsAncestor() throws {
+    let parent = kitsuneTemporaryDirectory("kitsune-apps")
+    defer { kitsuneRemove(parent) }
+    let real = parent.appendingPathComponent("real")
+    try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+    let link = parent.appendingPathComponent("link")
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+
+    let resolvedReal = AppRootWatcher.resolve(real.path)
+    #expect(AppRootWatcher.resolve(link.path) == resolvedReal)
+    #expect(AppRootWatcher.resolve(link.appendingPathComponent("Apps/More").path) == resolvedReal + "/Apps/More")
+}
