@@ -124,17 +124,26 @@ final class AppIndex: NSObject {
     /// Every `.app` at most `depth` components below one of `roots`. Packages are
     /// returned but never descended into — an app ships helper apps inside itself,
     /// and a launcher has no business offering them.
+    ///
+    /// The walk runs over the root's real path and reports under the root as written.
+    /// Handed a symlink, the enumerator lists nothing at all, so an `apps.paths` entry
+    /// that *is* a link found no apps; and under one it reports real paths, so the rows
+    /// named a directory the config never mentioned.
     nonisolated static func appPaths(in roots: [URL], depth: Int) -> [String] {
         var paths = Set<String>()
         for root in roots {
+            let written = root.standardizedFileURL.path
+            let real = AppRootWatcher.resolve(written)
             guard let enumerator = FileManager.default.enumerator(
-                at: root,
+                at: URL(fileURLWithPath: real, isDirectory: true),
                 includingPropertiesForKeys: [.isDirectoryKey, .isPackageKey],
                 options: [.skipsHiddenFiles, .skipsPackageDescendants]
             ) else { continue }
             for case let url as URL in enumerator {
                 if url.pathExtension.lowercased() == "app" {
-                    if isTopLevelApplication(url.path) { paths.insert(url.path) }
+                    let path = url.path.hasPrefix(real + "/")
+                        ? written + url.path.dropFirst(real.count) : url.path
+                    if isTopLevelApplication(path) { paths.insert(path) }
                     enumerator.skipDescendants()
                 } else if enumerator.level >= depth {
                     enumerator.skipDescendants()
@@ -227,6 +236,15 @@ final class AppIndex: NSObject {
         guard url.pathExtension == "app" else { return nil }
 
         let info = infoPlist(at: url)
+        // A `.app` directory without a parseable Info.plist is not an app yet. A drag
+        // install creates the directory long before it writes the plist, and the
+        // watcher re-scans mid-copy, so the row appeared under its file name and was
+        // renamed a scan later; an empty `.app` left by a failed copy was listed
+        // outright. Launch Services will not open one either. iOS apps on Apple Silicon
+        // are the exception: no `Contents` at all, the bundle is behind `WrappedBundle`.
+        guard !info.isEmpty
+            || FileManager.default.fileExists(atPath: url.appendingPathComponent("WrappedBundle").path)
+        else { return nil }
         let strings = localizedStrings(at: url)
         let localized = localizedName(of: url)
         // Same precedence `Bundle.object(forInfoDictionaryKey:)` uses: a localized

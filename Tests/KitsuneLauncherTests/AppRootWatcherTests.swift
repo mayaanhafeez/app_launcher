@@ -143,3 +143,48 @@ private func relevant(_ path: String, depth: Int = 3, flags: Int = 0) -> Bool {
     #expect(AppRootWatcher.resolve(link.path) == resolvedReal)
     #expect(AppRootWatcher.resolve(link.appendingPathComponent("Apps/More").path) == resolvedReal + "/Apps/More")
 }
+
+@Test func aBundleWithoutAnInfoPlistIsNotAnAppYet() throws {
+    let root = kitsuneTemporaryDirectory("kitsune-apps")
+    defer { kitsuneRemove(root) }
+    // A failed copy's leftovers, and a drag install caught before its plist lands.
+    let empty = root.appendingPathComponent("Empty.app")
+    try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
+    let partial = root.appendingPathComponent("Partial.app/Contents")
+    try FileManager.default.createDirectory(at: partial, withIntermediateDirectories: true)
+    try "<?xml version=\"1.0\"?><plist><dict><key>CFBundleName</key>".write(
+        to: partial.appendingPathComponent("Info.plist"), atomically: false, encoding: .utf8)
+
+    #expect(AppIndex.entryForAudit(path: empty.path) == nil)
+    #expect(AppIndex.entryForAudit(path: root.appendingPathComponent("Partial.app").path) == nil)
+
+    try makeApp("Partial", in: root)
+    #expect(AppIndex.entryForAudit(path: root.appendingPathComponent("Partial.app").path)?.name == "Partial")
+}
+
+@Test func aWrappedIOSAppIsStillAnApp() throws {
+    // iOS apps on Apple Silicon have no `Contents`; the real bundle sits under `Wrapper`.
+    let root = kitsuneTemporaryDirectory("kitsune-apps")
+    defer { kitsuneRemove(root) }
+    let app = root.appendingPathComponent("Phone.app")
+    let inner = app.appendingPathComponent("Wrapper/Phone.app")
+    try FileManager.default.createDirectory(at: inner, withIntermediateDirectories: true)
+    try FileManager.default.createSymbolicLink(atPath: app.appendingPathComponent("WrappedBundle").path,
+                                               withDestinationPath: "Wrapper/Phone.app")
+    #expect(AppIndex.entryForAudit(path: app.path)?.name == "Phone")
+}
+
+@Test func appsUnderASymlinkedRootKeepThePathTheConfigWrote() throws {
+    let parent = kitsuneTemporaryDirectory("kitsune-apps")
+    defer { kitsuneRemove(parent) }
+    let real = parent.appendingPathComponent("real")
+    try makeApp("Inside", in: real.appendingPathComponent("Apps"))
+    let link = parent.appendingPathComponent("link")
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+
+    // A root under a link reported the real directory, and a root that *is* the link
+    // listed nothing at all.
+    #expect(AppIndex.appPaths(in: [link.appendingPathComponent("Apps")], depth: 3)
+        == [link.appendingPathComponent("Apps/Inside.app").path])
+    #expect(AppIndex.appPaths(in: [link], depth: 3) == [link.appendingPathComponent("Apps/Inside.app").path])
+}
