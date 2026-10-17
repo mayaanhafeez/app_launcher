@@ -215,6 +215,12 @@ rather than enumerated once at `start()`, which is what picks up a `plugins/` di
 Recursion is tied to `watchesDirectory`: the `~/.config/theme` pointer watcher is aimed at the whole of `~/.config`,
 and walking that would watch every dotfile directory the user owns.
 
+The walk runs over **real** paths, because `contentsOfDirectory` lists nothing at all for a directory named through a
+symlink — a `~/.config/kitsune` linked into a dotfiles repo was watched as `config.lua` and `theme.lua` and nothing
+below them, so plugin saves only landed on a restart. A linked subdirectory reads as not-a-directory for the same
+reason, so every entry is resolved before it is classified, and a set of visited real directories keeps a link back up
+the tree from being walked twice.
+
 ### App index
 
 `AppIndex` scans `/Applications`, `/System/Applications` and `~/Applications`, plus whatever `apps.paths` adds, and a

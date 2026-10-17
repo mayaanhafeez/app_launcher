@@ -412,36 +412,55 @@ final class ConfigWatcher: @unchecked Sendable {
     /// The explicit `filenames` come first and unconditionally — they may not exist yet
     /// (a fresh install has no `config.lua`), and the `~/.config/theme` pointer has no
     /// `.lua` extension to be found by.
+    ///
+    /// The walk runs over **real** paths. Listing a directory by a name that is itself
+    /// a symlink returns nothing at all, so a `~/.config/kitsune` linked into a dotfiles
+    /// repository was watched as its two named files and nothing below them. A linked
+    /// subdirectory (`plugins -> ../shared/plugins`) reads as not-a-directory for the
+    /// same reason, so every entry is resolved before it is classified; `visited` is
+    /// what keeps a link back up the tree from being walked twice.
     private func watchedPaths() -> [String] {
         var paths = filenames.map { directory.appendingPathComponent($0).path }
         guard recursive else { return paths }
-        var seen = Set(paths)
-        var pending: [(url: URL, depth: Int)] = [(directory, 0)]
+        var seen = Set(paths.map(Self.realPath))
+        let root = Self.realPath(directory.path)
+        // The config directory itself already has `directorySource`.
+        var visited: Set<String> = [root]
+        var pending: [(path: String, depth: Int)] = [(root, 0)]
 
         while !pending.isEmpty, paths.count < Self.maxWatches {
-            let (url, depth) = pending.removeFirst()
+            let (path, depth) = pending.removeFirst()
             // `.skipsHiddenFiles` keeps a version-controlled config's `.git` out of it,
             // which would otherwise be most of the descriptors and all of the churn.
             let entries = (try? FileManager.default.contentsOfDirectory(
-                at: url,
-                includingPropertiesForKeys: [.isDirectoryKey],
+                at: URL(fileURLWithPath: path, isDirectory: true),
+                includingPropertiesForKeys: nil,
                 options: [.skipsHiddenFiles]
             )) ?? []
 
             for entry in entries where paths.count < Self.maxWatches {
-                let isDirectory = (try? entry.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
-                if isDirectory {
-                    guard depth < Self.maxDepth else { continue }
-                    pending.append((entry, depth + 1))
+                let real = Self.realPath(entry.path)
+                var isDirectory: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: real, isDirectory: &isDirectory) else { continue }
+                if isDirectory.boolValue {
+                    guard depth < Self.maxDepth, visited.insert(real).inserted else { continue }
+                    pending.append((real, depth + 1))
                 } else if entry.pathExtension != "lua" {
                     continue
                 }
-                // The config directory itself already has `directorySource`.
-                guard entry.path != directory.path, seen.insert(entry.path).inserted else { continue }
-                paths.append(entry.path)
+                guard seen.insert(real).inserted else { continue }
+                paths.append(real)
             }
         }
         return paths
+    }
+
+    /// `path` with every symlink resolved, or unchanged when it does not exist yet — a
+    /// named file a fresh install has not written is still watched by that name.
+    private static func realPath(_ path: String) -> String {
+        guard let real = realpath(path, nil) else { return path }
+        defer { free(real) }
+        return String(cString: real)
     }
 
     private func scheduleChange() {
