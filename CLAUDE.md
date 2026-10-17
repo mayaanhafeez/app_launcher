@@ -224,6 +224,22 @@ remove those rows on the next reload. An explicit reload (`kitsunectl reload`, R
 spec changed, so an unrelated save costs nothing. `apps.depth` (3 by default) caps how far below a root the walk goes, because a
 user root like `~/dev` can be enormous; 3 covers every built-in root, down to `~/Applications/CrossOver/Steam/Steam.app`.
 Packages are returned but never descended into, so an app's bundled helper apps stay out of the list.
+The walk runs over each root's **real** path and reports under the root as written: the enumerator lists nothing at all
+for a root that is itself a symlink, and real paths for one beneath a link. A `.app` without a parseable
+`Contents/Info.plist` is not an entry (`makeEntry` returns nil) — a drag install is caught mid-copy by the watcher, and
+an empty bundle left by a failed copy was listed outright — except iOS apps on Apple Silicon, which have no `Contents`
+and are read through their `WrappedBundle` link instead. The written root is `root.path`, not a standardized one, which
+would turn `/private/tmp` into `/tmp`.
+
+The roots are **watched**, so an app installed or removed while the launcher is resident shows up without a reload —
+before this it could only be found through Spotlight. `AppRootWatcher` is one FSEvents stream over every root rather
+than `ConfigWatcher`'s vnode sources, because an app can sit `apps.depth` folders down and a descriptor per directory
+under `/Applications` is hundreds of them. It asks for file-level events and `isRelevant` filters them the way
+`appPaths` walks: hidden entries, anything deeper than a bundle's `Contents/Info.plist`, and anything past `depth` are
+ignored, so an app writing into its own bundle or Finder touching `.DS_Store` costs nothing. A relevant batch re-scans
+after a 1s trailing debounce, which a long drag-install copy needs. The stream is re-armed only when the roots or depth
+change, and it retains the watcher through its context, so `stop()` has to be called explicitly — `AppIndex.deinit`
+does. A scan landing mid-search refreshes with the current query, not `""`, or the field and the list would disagree.
 
 Icons are the index's entire memory cost — `NSWorkspace.icon(forFile:)` returns a multi-representation image sized for
 the Finder and the index holds one per app for the process lifetime. `thumbnail(for:)` flattens each to a single 2x

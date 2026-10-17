@@ -29,7 +29,10 @@ func kitsuneWaitForApps(_ index: AppIndex, timeout: TimeInterval = 5, _ conditio
     defer { kitsuneRemove(root) }
     try kitsuneMakeApp("Before", in: root)
 
-    let index = AppIndex(baseRoots: [root])
+    // The watcher would re-scan on its own once "Before" lands in its first batch, which
+    // can be the moment this test checks that nothing re-scanned. Held off past the end
+    // of the test, so only `apply` and `refresh` can scan here.
+    let index = AppIndex(baseRoots: [root], watchDebounce: 3600)
     index.refresh()
     #expect(await kitsuneWaitForApps(index) { $0 == ["Before"] })
 
