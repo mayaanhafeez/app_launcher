@@ -215,6 +215,12 @@ rather than enumerated once at `start()`, which is what picks up a `plugins/` di
 Recursion is tied to `watchesDirectory`: the `~/.config/theme` pointer watcher is aimed at the whole of `~/.config`,
 and walking that would watch every dotfile directory the user owns.
 
+The walk runs over **real** paths, because `contentsOfDirectory` lists nothing at all for a directory named through a
+symlink — a `~/.config/kitsune` linked into a dotfiles repo was watched as `config.lua` and `theme.lua` and nothing
+below them, so plugin saves only landed on a restart. A linked subdirectory reads as not-a-directory for the same
+reason, so every entry is resolved before it is classified, and a set of visited real directories keeps a link back up
+the tree from being walked twice.
+
 ### App index
 
 `AppIndex` scans `/Applications`, `/System/Applications` and `~/Applications`, plus whatever `apps.paths` adds, and a
@@ -224,6 +230,15 @@ remove those rows on the next reload. An explicit reload (`kitsunectl reload`, R
 spec changed, so an unrelated save costs nothing. `apps.depth` (3 by default) caps how far below a root the walk goes, because a
 user root like `~/dev` can be enormous; 3 covers every built-in root, down to `~/Applications/CrossOver/Steam/Steam.app`.
 Packages are returned but never descended into, so an app's bundled helper apps stay out of the list.
+"Hidden" means a dot-prefixed name, checked by hand rather than with `.skipsHiddenFiles`: that option also skips the
+BSD `hidden` flag, which macOS sets on `/Applications/Safari.app` (a link into the system Cryptex), and Safari silently
+dropped out of the index.
+The walk runs over each root's **real** path and reports under the root as written: the enumerator lists nothing at all
+for a root that is itself a symlink, and real paths for one beneath a link. A `.app` without a parseable
+`Contents/Info.plist` is not an entry (`makeEntry` returns nil) — a drag install is caught mid-copy by the watcher, and
+an empty bundle left by a failed copy was listed outright — except iOS apps on Apple Silicon, which have no `Contents`
+and are read through their `WrappedBundle` link instead. The written root is `root.path`, not a standardized one, which
+would turn `/private/tmp` into `/tmp`.
 
 The roots are **watched**, so an app installed or removed while the launcher is resident shows up without a reload —
 before this it could only be found through Spotlight. `AppRootWatcher` is one FSEvents stream over every root rather

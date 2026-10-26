@@ -229,3 +229,91 @@ private func write(_ contents: String, to relative: String, in directory: URL) t
     await settle()
     #expect(changes.value == 0)
 }
+
+// MARK: - A config reached through a symlink
+
+/// A dotfiles setup: the config lives in `real/`, and the directory the watcher is
+/// given is a link to it.
+private func linkedConfig(in root: URL) throws -> (link: URL, real: URL) {
+    let real = root.appendingPathComponent("dotfiles/kitsune")
+    try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+    try "return { items = {} }".write(to: real.appendingPathComponent("config.lua"), atomically: true, encoding: .utf8)
+    let link = root.appendingPathComponent("kitsune")
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+    return (link, real)
+}
+
+@Test func watcherWalksAConfigDirectoryThatIsASymlink() async throws {
+    // Listing a directory by a name that is itself a link returns nothing at all, so
+    // the walk used to stop at the two named files and never saw `plugins/`.
+    let root = kitsuneTemporaryDirectory("kitsune-watch")
+    defer { kitsuneRemove(root) }
+    let (link, real) = try linkedConfig(in: root)
+    let plugin = try write("return {}", to: "plugins/git.lua", in: real)
+
+    let (watcher, changes) = try startedWatcher(in: link)
+    defer { _ = watcher }
+    await settle()
+    #expect(changes.value == 0)
+
+    try kitsuneRewriteInPlace(plugin, "return { items = { { id = 'git', label = 'Git' } } }")
+    #expect(await kitsuneWaitUntil(timeout: 3) { changes.value > 0 })
+}
+
+@Test func watcherSeesASaveByRenameUnderASymlinkedConfigDirectory() async throws {
+    // A rename touches `plugins/`, never the config root, so the subdirectory has to be
+    // watched as well as the file.
+    let root = kitsuneTemporaryDirectory("kitsune-watch")
+    defer { kitsuneRemove(root) }
+    let (link, real) = try linkedConfig(in: root)
+    let plugin = try write("return {}", to: "plugins/git.lua", in: real)
+
+    let (watcher, changes) = try startedWatcher(in: link)
+    defer { _ = watcher }
+    await settle()
+
+    try "return { items = { { id = 'git' } } }".write(to: plugin, atomically: true, encoding: .utf8)
+    #expect(await kitsuneWaitUntil(timeout: 3) { changes.value > 0 })
+}
+
+@Test func watcherFollowsASymlinkedPluginDirectory() async throws {
+    // `plugins -> ../shared/plugins` reads as not-a-directory, so it was never walked.
+    let root = kitsuneTemporaryDirectory("kitsune-watch")
+    defer { kitsuneRemove(root) }
+    let directory = root.appendingPathComponent("kitsune")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    try "return { items = {} }".write(to: directory.appendingPathComponent("config.lua"), atomically: true, encoding: .utf8)
+    let plugin = try write("return {}", to: "shared/plugins/git.lua", in: root)
+    try FileManager.default.createSymbolicLink(
+        at: directory.appendingPathComponent("plugins"),
+        withDestinationURL: plugin.deletingLastPathComponent()
+    )
+
+    let (watcher, changes) = try startedWatcher(in: directory)
+    defer { _ = watcher }
+    await settle()
+    #expect(changes.value == 0)
+
+    try kitsuneRewriteInPlace(plugin, "return { items = { { id = 'git' } } }")
+    #expect(await kitsuneWaitUntil(timeout: 3) { changes.value > 0 })
+}
+
+@Test func watcherSurvivesASymlinkLoop() async throws {
+    // Following links makes a loop walkable; each real directory is visited once.
+    let root = kitsuneTemporaryDirectory("kitsune-watch")
+    defer { kitsuneRemove(root) }
+    let (link, real) = try linkedConfig(in: root)
+    let plugin = try write("return {}", to: "plugins/git.lua", in: real)
+    try FileManager.default.createSymbolicLink(
+        at: real.appendingPathComponent("plugins/up"),
+        withDestinationURL: real
+    )
+
+    let (watcher, changes) = try startedWatcher(in: link)
+    defer { _ = watcher }
+    await settle()
+    #expect(changes.value == 0)
+
+    try kitsuneRewriteInPlace(plugin, "return { items = { { id = 'git' } } }")
+    #expect(await kitsuneWaitUntil(timeout: 3) { changes.value > 0 })
+}

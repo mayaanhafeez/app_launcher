@@ -130,3 +130,88 @@ private func relevant(_ path: String, depth: Int = 3, flags: Int = 0) -> Bool {
     try makeApp("Late", in: root)
     #expect(await waitForApps(index) { $0 == ["Late"] })
 }
+
+@Test func aMissingRootUnderASymlinkResolvesThroughItsAncestor() throws {
+    let parent = kitsuneTemporaryDirectory("kitsune-apps")
+    defer { kitsuneRemove(parent) }
+    let real = parent.appendingPathComponent("real")
+    try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+    let link = parent.appendingPathComponent("link")
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+
+    let resolvedReal = AppRootWatcher.resolve(real.path)
+    #expect(AppRootWatcher.resolve(link.path) == resolvedReal)
+    #expect(AppRootWatcher.resolve(link.appendingPathComponent("Apps/More").path) == resolvedReal + "/Apps/More")
+}
+
+@Test func aBundleWithoutAnInfoPlistIsNotAnAppYet() throws {
+    let root = kitsuneTemporaryDirectory("kitsune-apps")
+    defer { kitsuneRemove(root) }
+    // A failed copy's leftovers, and a drag install caught before its plist lands.
+    let empty = root.appendingPathComponent("Empty.app")
+    try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
+    let partial = root.appendingPathComponent("Partial.app/Contents")
+    try FileManager.default.createDirectory(at: partial, withIntermediateDirectories: true)
+    try "<?xml version=\"1.0\"?><plist><dict><key>CFBundleName</key>".write(
+        to: partial.appendingPathComponent("Info.plist"), atomically: false, encoding: .utf8)
+
+    #expect(AppIndex.entryForAudit(path: empty.path) == nil)
+    #expect(AppIndex.entryForAudit(path: root.appendingPathComponent("Partial.app").path) == nil)
+
+    try makeApp("Partial", in: root)
+    #expect(AppIndex.entryForAudit(path: root.appendingPathComponent("Partial.app").path)?.name == "Partial")
+}
+
+@Test func aWrappedIOSAppIsStillAnApp() throws {
+    // iOS apps on Apple Silicon have no `Contents`; the real bundle sits under `Wrapper`.
+    let root = kitsuneTemporaryDirectory("kitsune-apps")
+    defer { kitsuneRemove(root) }
+    let app = root.appendingPathComponent("Phone.app")
+    let inner = app.appendingPathComponent("Wrapper/Phone.app")
+    try FileManager.default.createDirectory(at: inner, withIntermediateDirectories: true)
+    let plist: [String: Any] = ["CFBundleDisplayName": "My Phone", "CFBundleIdentifier": "test.kitsune.phone"]
+    try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        .write(to: inner.appendingPathComponent("Info.plist"))
+    try FileManager.default.createSymbolicLink(atPath: app.appendingPathComponent("WrappedBundle").path,
+                                               withDestinationPath: "Wrapper/Phone.app")
+    // Named and identified from the wrapped bundle's own plist, not the folder name.
+    let entry = AppIndex.entryForAudit(path: app.path)
+    #expect(entry?.name == "My Phone")
+    #expect(entry?.id == "test.kitsune.phone")
+    // The link can land after the directory; that has to re-scan like a plist write.
+    #expect(relevant("/Applications/Phone.app/WrappedBundle"))
+}
+
+@Test func aFlagHiddenAppIsIndexedButADotFileIsNot() throws {
+    let parent = kitsuneTemporaryDirectory("kitsune-apps")
+    defer { kitsuneRemove(parent) }
+    // Safari's shape: a link in the root, into a directory outside it, with the BSD
+    // `hidden` flag set on the link itself.
+    try makeApp("Safari", in: parent.appendingPathComponent("Cryptex"))
+    let root = parent.appendingPathComponent("Applications")
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let link = root.appendingPathComponent("Safari.app")
+    try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: "../Cryptex/Safari.app")
+    #expect(lchflags(link.path, UInt32(UF_HIDDEN)) == 0)
+    try makeApp("Ghost", in: root.appendingPathComponent(".staging"))
+
+    #expect(AppIndex.appPaths(in: [root], depth: 3) == [link.path])
+}
+
+@Test func appsUnderASymlinkedRootKeepThePathTheConfigWrote() throws {
+    let parent = kitsuneTemporaryDirectory("kitsune-apps")
+    defer { kitsuneRemove(parent) }
+    let real = parent.appendingPathComponent("real")
+    try makeApp("Inside", in: real.appendingPathComponent("Apps"))
+    let link = parent.appendingPathComponent("link")
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+
+    // A root under a link reported the real directory, and a root that *is* the link
+    // listed nothing at all.
+    #expect(AppIndex.appPaths(in: [link.appendingPathComponent("Apps")], depth: 3)
+        == [link.appendingPathComponent("Apps/Inside.app").path])
+    #expect(AppIndex.appPaths(in: [link], depth: 3) == [link.appendingPathComponent("Apps/Inside.app").path])
+    // Standardizing would have reported a `/private/tmp` root as `/tmp`.
+    let spelled = URL(fileURLWithPath: AppRootWatcher.resolve(link.path))
+    #expect(AppIndex.appPaths(in: [spelled], depth: 3) == [spelled.appendingPathComponent("Apps/Inside.app").path])
+}

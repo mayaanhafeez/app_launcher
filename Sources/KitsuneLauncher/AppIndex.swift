@@ -124,17 +124,36 @@ final class AppIndex: NSObject {
     /// Every `.app` at most `depth` components below one of `roots`. Packages are
     /// returned but never descended into — an app ships helper apps inside itself,
     /// and a launcher has no business offering them.
+    ///
+    /// The walk runs over the root's real path and reports under the root as written.
+    /// Handed a symlink, the enumerator lists nothing at all, so an `apps.paths` entry
+    /// that *is* a link found no apps; and under one it reports real paths, so the rows
+    /// named a directory the config never mentioned.
     nonisolated static func appPaths(in roots: [URL], depth: Int) -> [String] {
         var paths = Set<String>()
         for root in roots {
+            // `.path`, not a standardized one: standardizing drops `/private` from
+            // `/private/tmp`, which is not the path the config wrote either.
+            let written = root.path
+            let real = AppRootWatcher.resolve(written)
             guard let enumerator = FileManager.default.enumerator(
-                at: root,
+                at: URL(fileURLWithPath: real, isDirectory: true),
                 includingPropertiesForKeys: [.isDirectoryKey, .isPackageKey],
-                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+                options: [.skipsPackageDescendants]
             ) else { continue }
             for case let url as URL in enumerator {
+                // Dot-files only, the same rule `AppRootWatcher.isRelevant` applies.
+                // `.skipsHiddenFiles` also skips the BSD `hidden` flag, which macOS sets
+                // on `/Applications/Safari.app` — a link into the system Cryptex that
+                // Finder still lists — so Safari was missing from the index.
+                if url.lastPathComponent.hasPrefix(".") {
+                    enumerator.skipDescendants()
+                    continue
+                }
                 if url.pathExtension.lowercased() == "app" {
-                    if isTopLevelApplication(url.path) { paths.insert(url.path) }
+                    let path = url.path.hasPrefix(real + "/")
+                        ? written + url.path.dropFirst(real.count) : url.path
+                    if isTopLevelApplication(path) { paths.insert(path) }
                     enumerator.skipDescendants()
                 } else if enumerator.level >= depth {
                     enumerator.skipDescendants()
@@ -227,6 +246,12 @@ final class AppIndex: NSObject {
         guard url.pathExtension == "app" else { return nil }
 
         let info = infoPlist(at: url)
+        // A `.app` directory without a parseable Info.plist is not an app yet. A drag
+        // install creates the directory long before it writes the plist, and the
+        // watcher re-scans mid-copy, so the row appeared under its file name and was
+        // renamed a scan later; an empty `.app` left by a failed copy was listed
+        // outright. Launch Services will not open one either.
+        guard !info.isEmpty else { return nil }
         let strings = localizedStrings(at: url)
         let localized = localizedName(of: url)
         // Same precedence `Bundle.object(forInfoDictionaryKey:)` uses: a localized
@@ -255,8 +280,13 @@ final class AppIndex: NSObject {
 
     /// The bundle's Info.plist as a plain dictionary, retained by nobody. Handles the
     /// binary format as well as XML, which `PropertyListSerialization` does for free.
+    /// An iOS app on Apple Silicon has no `Contents`: its own bundle sits behind the
+    /// `WrappedBundle` link, with the plist at its top level as iOS lays it out.
     nonisolated private static func infoPlist(at url: URL) -> [String: Any] {
-        guard let data = try? Data(contentsOf: url.appendingPathComponent("Contents/Info.plist")),
+        let mac = url.appendingPathComponent("Contents/Info.plist")
+        let wrapped = url.appendingPathComponent("WrappedBundle/Info.plist")
+        let file = FileManager.default.fileExists(atPath: mac.path) ? mac : wrapped
+        guard let data = try? Data(contentsOf: file),
               let plist = try? PropertyListSerialization.propertyList(from: data, format: nil),
               let dictionary = plist as? [String: Any] else { return [:] }
         return dictionary
@@ -369,14 +399,26 @@ final class AppRootWatcher: @unchecked Sendable {
         self.roots = roots
         self.depth = depth
         self.onChange = onChange
-        resolvedRoots = roots.map { path in
-            guard let real = realpath(path, nil) else { return path }
-            defer { free(real) }
-            return String(cString: real)
-        }
+        resolvedRoots = roots.map(Self.resolve)
     }
 
-    deinit { stop() }
+    /// `path` with symlinks resolved as FSEvents will report it. A root that does not
+    /// exist yet has no real path, so the nearest existing ancestor is resolved and the
+    /// missing tail re-appended — keeping it as written would leave a root under a
+    /// symlinked directory matching nothing once it is created.
+    nonisolated static func resolve(_ path: String) -> String {
+        var existing = (path as NSString).standardizingPath
+        var missing: [String] = []
+        while existing.count > 1 {
+            if let real = realpath(existing, nil) {
+                defer { free(real) }
+                return missing.reversed().reduce(String(cString: real)) { ($0 as NSString).appendingPathComponent($1) }
+            }
+            missing.append((existing as NSString).lastPathComponent)
+            existing = (existing as NSString).deletingLastPathComponent
+        }
+        return path
+    }
 
     func start() {
         guard stream == nil else { return }
@@ -449,6 +491,7 @@ final class AppRootWatcher: @unchecked Sendable {
             guard bundle < depth else { return false }
             let inside = relative[(bundle + 1)...].map(String.init)
             return inside.isEmpty || inside == ["Contents"] || inside == ["Contents", "Info.plist"]
+                || inside == ["WrappedBundle"]
         }
         // A folder that could hold an app: renaming or removing it moves every app below.
         return relative.count < depth
