@@ -403,7 +403,7 @@ final class MenuController {
                 if lhs != rhs { return lhs < rhs }
                 return $0.score == $1.score ? $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending : $0.score < $1.score
             }
-            if let split = rows.firstIndex(where: { $0.section != "current" }), split > 0 {
+            if let split = rows.firstIndex(where: { Self.sectionRank($0.section) != 0 }), split > 0 {
                 var row = rows[split]
                 row = DisplayRow(id: row.id, kind: row.kind, label: row.label, detail: row.detail, symbol: row.symbol, image: row.image, score: row.score, section: "drilldown-start", action: row.action)
                 rows[split] = row
@@ -424,9 +424,14 @@ final class MenuController {
     /// that survive the filter on purpose. `keep` sorting last is what leaves it below
     /// the search results and — since provider rows are appended after this list — above
     /// the provider rows, which is the order the back row's `position = "bottom"` assumes.
+    ///
+    /// Apps rank with the direct children, so the two are ordered by score. Ranked with
+    /// the drilldown hits instead, any child that matched at all came first: "term"
+    /// put the System menu, matched by letters strung across its label and aliases,
+    /// above Terminal.
     private static func sectionRank(_ section: String) -> Int {
         switch section {
-        case "current": return 0
+        case "current", "apps": return 0
         case "keep": return 2
         default: return 1
         }
