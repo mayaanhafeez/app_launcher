@@ -404,9 +404,7 @@ final class MenuController {
                 return $0.score == $1.score ? $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending : $0.score < $1.score
             }
             if let split = rows.firstIndex(where: { Self.sectionRank($0.section) != 0 }), split > 0 {
-                var row = rows[split]
-                row = DisplayRow(id: row.id, kind: row.kind, label: row.label, detail: row.detail, symbol: row.symbol, image: row.image, score: row.score, section: "drilldown-start", action: row.action)
-                rows[split] = row
+                rows[split].section = "drilldown-start"
             }
         }
         if search.rowLimit > 0 { rows = Array(rows.prefix(search.rowLimit)) }

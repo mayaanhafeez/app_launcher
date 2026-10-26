@@ -195,3 +195,29 @@ private func store(_ pasteboard: FakePasteboard, url: URL? = nil,
     controller.clipboardSpec = ClipboardSpec(enabled: false)
     #expect(controller.rows(route: "root", query: "").rows.isEmpty)
 }
+
+/// Found by a white-box pass: the drilldown divider was marked by rebuilding the row,
+/// which dropped `rowAction`, so a history entry that landed on the divider could no
+/// longer be copied.
+@MainActor
+@Test func aHistoryRowOnTheDividerKeepsItsCopyAction() throws {
+    let reading = Locked(ClipboardHistory.Reading(changeCount: 0, concealed: false, string: nil))
+    let clipboard = ClipboardHistory(url: nil, read: { reading.value })
+    let controller = MenuController(appIndex: AppIndex(baseRoots: []), runtime: LuaRuntime(), clipboard: clipboard)
+    // A direct child that also matches puts the history row after the divider. Set
+    // before the spec: assigning `nodes` replaces the injected clipboard menu.
+    controller.nodes = [
+        MenuNode(id: "root", parent: "", kind: .menu, label: "Go", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: nil, order: 0),
+        MenuNode(id: "clipboard.tool", parent: "clipboard", kind: .action, label: "Needle Tool", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: .shell("true"), order: 1),
+    ]
+    controller.clipboardSpec = ClipboardSpec(enabled: true, pollInterval: 3600)
+    defer { controller.clipboardSpec = ClipboardSpec(enabled: false) }
+    let text = "needle\nfull clipboard payload"
+    reading.value = ClipboardHistory.Reading(changeCount: 1, concealed: false, string: text)
+    clipboard.poll()
+
+    let rows = controller.rows(route: "clipboard", query: "needle").rows
+    let marked = try #require(rows.first { $0.id == "clip:0" })
+    #expect(marked.section == "drilldown-start")
+    #expect(marked.rowAction == .copyText(text))
+}
