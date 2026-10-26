@@ -17,6 +17,14 @@ import Testing
     #expect(action("v", [.command, .capsLock]) == .paste)
 }
 
+@Test func escapeClearsTheQueryBeforeGoingBack() {
+    // A search at root used to be cleared *and* backed out of in one press, which at
+    // root is a dismissal: the query and the panel went together.
+    #expect(EscapeStep.next(query: "term") == .clearQuery)
+    #expect(EscapeStep.next(query: " ") == .clearQuery)
+    #expect(EscapeStep.next(query: "") == .back)
+}
+
 @Test func editingKeysIgnoreEverythingButTheirOwnChord() {
     func action(_ key: String, _ mods: NSEvent.ModifierFlags) -> EditingAction? {
         EditingKeys.action(characters: key, modifiers: mods)

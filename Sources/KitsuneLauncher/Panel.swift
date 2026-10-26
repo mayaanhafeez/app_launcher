@@ -747,10 +747,14 @@ final class PanelController: NSWindowController, NSWindowDelegate, NSTableViewDa
     }
 
     private func escape() {
-        input.stringValue = ""
-        updatePrompt()
-        onQuery?("")
-        _ = goBack()
+        switch EscapeStep.next(query: input.stringValue) {
+        case .clearQuery:
+            input.stringValue = ""
+            updatePrompt()
+            onQuery?("")
+        case .back:
+            _ = goBack()
+        }
     }
 
     private func goBack() -> Bool {
