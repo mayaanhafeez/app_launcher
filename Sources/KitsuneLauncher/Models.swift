@@ -548,6 +548,18 @@ enum EditingKeys {
     }
 }
 
+/// What one Escape press does: clear what was typed, and only on an empty field go
+/// back a level — which at root hides the panel. Doing both in one press made a
+/// search at root dismiss the panel outright, taking the query with it.
+enum EscapeStep: Equatable {
+    case clearQuery
+    case back
+
+    static func next(query: String) -> EscapeStep {
+        query.isEmpty ? .back : .clearQuery
+    }
+}
+
 // MARK: - Placement
 
 /// Where the card sits on its display.
