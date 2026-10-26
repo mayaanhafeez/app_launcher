@@ -182,6 +182,22 @@ private func relevant(_ path: String, depth: Int = 3, flags: Int = 0) -> Bool {
     #expect(relevant("/Applications/Phone.app/WrappedBundle"))
 }
 
+@Test func aFlagHiddenAppIsIndexedButADotFileIsNot() throws {
+    let parent = kitsuneTemporaryDirectory("kitsune-apps")
+    defer { kitsuneRemove(parent) }
+    // Safari's shape: a link in the root, into a directory outside it, with the BSD
+    // `hidden` flag set on the link itself.
+    try makeApp("Safari", in: parent.appendingPathComponent("Cryptex"))
+    let root = parent.appendingPathComponent("Applications")
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let link = root.appendingPathComponent("Safari.app")
+    try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: "../Cryptex/Safari.app")
+    #expect(lchflags(link.path, UInt32(UF_HIDDEN)) == 0)
+    try makeApp("Ghost", in: root.appendingPathComponent(".staging"))
+
+    #expect(AppIndex.appPaths(in: [root], depth: 3) == [link.path])
+}
+
 @Test func appsUnderASymlinkedRootKeepThePathTheConfigWrote() throws {
     let parent = kitsuneTemporaryDirectory("kitsune-apps")
     defer { kitsuneRemove(parent) }

@@ -139,9 +139,17 @@ final class AppIndex: NSObject {
             guard let enumerator = FileManager.default.enumerator(
                 at: URL(fileURLWithPath: real, isDirectory: true),
                 includingPropertiesForKeys: [.isDirectoryKey, .isPackageKey],
-                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+                options: [.skipsPackageDescendants]
             ) else { continue }
             for case let url as URL in enumerator {
+                // Dot-files only, the same rule `AppRootWatcher.isRelevant` applies.
+                // `.skipsHiddenFiles` also skips the BSD `hidden` flag, which macOS sets
+                // on `/Applications/Safari.app` — a link into the system Cryptex that
+                // Finder still lists — so Safari was missing from the index.
+                if url.lastPathComponent.hasPrefix(".") {
+                    enumerator.skipDescendants()
+                    continue
+                }
                 if url.pathExtension.lowercased() == "app" {
                     let path = url.path.hasPrefix(real + "/")
                         ? written + url.path.dropFirst(real.count) : url.path
