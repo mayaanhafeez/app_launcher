@@ -160,7 +160,9 @@ struct DisplayRow: @unchecked Sendable, Equatable {
     let symbol: String
     let image: NSImage?
     let score: Int
-    let section: String
+    /// `var` so the drilldown divider can be marked on the row in place. Rebuilding
+    /// the row to change it had to name every field, and dropped `rowAction`.
+    var section: String
     /// Set on provider rows, which have no backing `MenuNode` to look up.
     var action: ScriptAction? = nil
     /// Set on the rows of an actions menu, which back no `MenuNode` either — and
