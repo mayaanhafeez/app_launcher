@@ -130,7 +130,9 @@ AppIndex ──onChange──▶ MenuController
 - **Empty query shows direct children; a non-empty query searches all descendants** (`isDescendant`, depth-capped at 32).
   Descendant hits are sorted after direct children, their `detail` is replaced by the breadcrumb `path(for:)`, and the
   first one is marked `section == "drilldown-start"` purely so `RowView` can draw a divider there.
-- Apps are merged into results only at `apps` (all of them) and at `root` with a non-empty query (top 40).
+- Apps are merged into results only at `apps` (all of them) and at `root` with a non-empty query (top 40). At `root`
+  they rank *with* the direct children, by score, not after them: any child that matched at all used to come first, so
+  "term" put the System menu (letters strung across its label and aliases) above Terminal.
 - **A `provider` belongs to the submenu that declares it and fires while that submenu is
   open** — entering `search` runs `search`'s provider. It is deliberately not driven off the
   visible children: providers used to be collected from `candidates` (the active menu's

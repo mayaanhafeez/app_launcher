@@ -176,3 +176,31 @@ import Testing
     #expect(icon.representations.count == 1)
     #expect(icon.representations.first?.pixelsWide == Int(AppIndex.thumbnailSize) * 2)
 }
+
+@MainActor
+@Test func aCloseAppMatchOutranksAStretchedMenuMatch() async throws {
+    let root = kitsuneTemporaryDirectory("kitsune-apps")
+    defer { kitsuneRemove(root) }
+    try kitsuneMakeApp("Terminal", in: root)
+    let index = AppIndex(baseRoots: [root], watchDebounce: 3600)
+    index.refresh()
+    #expect(await kitsuneWaitForApps(index) { $0 == ["Terminal"] })
+
+    let controller = MenuController(appIndex: index, runtime: LuaRuntime())
+    // "term" matches System only by stringing letters across its label and aliases.
+    var system = MenuNode(id: "system", parent: "root", kind: .menu, label: "System", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: nil, order: 1)
+    system.aliases = ["power", "power-menu"]
+    controller.nodes = [
+        MenuNode(id: "root", parent: "", kind: .menu, label: "Go", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: nil, order: 0),
+        system,
+        MenuNode(id: "install", parent: "root", kind: .menu, label: "Install", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: nil, order: 2),
+        MenuNode(id: "install.terminal", parent: "install", kind: .action, label: "Terminal", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: .shell("true"), order: 3),
+    ]
+    var rows: [DisplayRow] = []
+    controller.onRows = { _, emitted in rows = emitted }
+    controller.open()
+    controller.update(query: "term")
+
+    #expect(rows.map(\.label) == ["Terminal", "System", "Terminal"])
+    #expect(rows.map(\.section) == ["apps", "current", "drilldown-start"])
+}
