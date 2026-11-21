@@ -133,6 +133,10 @@ AppIndex ──onChange──▶ MenuController
 - Apps are merged into results only at `apps` (all of them) and at `root` with a non-empty query (top 40). At `root`
   they rank *with* the direct children, by score, not after them: any child that matched at all used to come first, so
   "term" put the System menu (letters strung across its label and aliases) above Terminal.
+- **Frecency reorders within a match tier, never across one.** `FuzzyMatcher.Query.rank` is the score both apps and
+  nodes sort by: the fuzzy score minus the usage bonus, plus `tierSpan` unless every query word *starts* a word of the
+  candidate. The bonus grows with the log of the use count and is unbounded against match quality, so "dia" put a
+  much-opened Clipboard menu (d…i…a strung across "clipboard … clip history") above the Dia app.
 - **A `provider` belongs to the submenu that declares it and fires while that submenu is
   open** — entering `search` runs `search`'s provider. It is deliberately not driven off the
   visible children: providers used to be collected from `candidates` (the active menu's

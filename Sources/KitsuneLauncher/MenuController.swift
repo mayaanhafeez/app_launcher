@@ -390,8 +390,9 @@ final class MenuController {
             // to consume what was typed, so the breadcrumb a search hit would get is
             // noise on it.
             if node.keep { return row(node.order, node.detail, "keep") }
-            guard let base = needle.score(in: node.searchText(includingDetail: search.matchDetail)) else { return nil }
-            return row(base - usage.bonus(for: node.id), path(for: node),
+            guard let score = needle.rank(in: node.searchText(includingDetail: search.matchDetail),
+                                          bonus: usage.bonus(for: node.id)) else { return nil }
+            return row(score, path(for: node),
                        node.parent == menu ? "current" : "drilldown")
         })
         if query.isEmpty {

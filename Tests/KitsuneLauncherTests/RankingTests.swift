@@ -143,3 +143,28 @@ private func rankingController() -> MenuController {
     #expect(store.bonus(for: "row-1", now: start.addingTimeInterval(1)) > 0)
     #expect(store.bonus(for: "row-\(UsageStore.recordLimit)", now: start.addingTimeInterval(Double(UsageStore.recordLimit))) > 0)
 }
+
+@MainActor
+@Test func frecencyCannotLiftAStrungMatchAboveAnExactOne() async throws {
+    let root = kitsuneTemporaryDirectory("kitsune-apps-dia")
+    defer { kitsuneRemove(root) }
+    try kitsuneMakeApp("Dia", in: root)
+    let index = AppIndex(baseRoots: [root], watchDebounce: 3600)
+    index.refresh()
+    #expect(await kitsuneWaitForApps(index) { $0 == ["Dia"] })
+
+    let controller = MenuController(appIndex: index, runtime: LuaRuntime())
+    // "dia" matches Clipboard only as d…i…a strung across its label and aliases.
+    var clipboard = MenuNode(id: "clipboard", parent: "root", kind: .menu, label: "Clipboard", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: nil, order: 1)
+    clipboard.aliases = ["clip", "history"]
+    controller.nodes = [
+        MenuNode(id: "root", parent: "", kind: .menu, label: "Go", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: nil, order: 0),
+        clipboard,
+    ]
+    for _ in 0..<30 { controller.usage.record("clipboard") }
+    var labels: [String] = []
+    controller.onRows = { _, rows in labels = rows.map(\.label) }
+    controller.open()
+    controller.update(query: "dia")
+    #expect(labels == ["Dia", "Clipboard"])
+}

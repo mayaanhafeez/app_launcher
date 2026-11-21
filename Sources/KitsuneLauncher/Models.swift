@@ -976,6 +976,45 @@ enum FuzzyMatcher {
             return Self.match(characters, folded) { " /._-".contains($0) }
         }
 
+        /// The score a row is *ranked* by: the fuzzy score, discounted by `bonus`
+        /// (frecency), and pushed behind every word-prefix match when it is not one.
+        ///
+        /// The discount alone is unbounded against match quality — it grows with the
+        /// log of the use count, while a fuzzy score only separates a clean hit from a
+        /// letter-strung one by a few dozen points. So "dia" put the Clipboard menu,
+        /// opened often and matched by `d`…`i`…`a` strung across "clipboard … clip
+        /// history", above the Dia app whose name *is* the query. Frecency still
+        /// reorders rows freely within a tier; it just cannot carry a row across one.
+        func rank(in candidate: String, bonus: Int = 0) -> Int? {
+            guard let base = score(in: candidate) else { return nil }
+            return base - bonus + (startsWords(in: candidate) ? 0 : FuzzyMatcher.tierSpan)
+        }
+
+        /// True when every whitespace-separated word of the query begins a word of
+        /// `candidate` — "dia" in "Dia", "vs code" in "com.microsoft.VSCode", "sys set"
+        /// in "System Settings". Words split on the same boundaries `match` rewards.
+        func startsWords(in candidate: String) -> Bool {
+            if isEmpty { return true }
+            if let needle = ascii {
+                let bytes = Array(candidate.utf8)
+                if bytes.allSatisfy({ $0 < 0x80 }) {
+                    return Self.startsWords(needle, bytes.map(Self.lowercased), space: 32) {
+                        $0 == 32 || $0 == 47 || $0 == 46 || $0 == 95 || $0 == 45
+                    }
+                }
+            }
+            let folded = Array(candidate.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current))
+            return Self.startsWords(characters, folded, space: " ") { " /._-".contains($0) }
+        }
+
+        private static func startsWords<Element: Equatable>(_ needle: [Element], _ haystack: [Element], space: Element,
+                                                             isBoundary: (Element) -> Bool) -> Bool {
+            let tokens = needle.split(separator: space)
+            if tokens.isEmpty { return true }
+            let words = haystack.split(whereSeparator: isBoundary)
+            return tokens.allSatisfy { token in words.contains { $0.starts(with: token) } }
+        }
+
         private static func lowercased(_ byte: UInt8) -> UInt8 {
             (byte >= 65 && byte <= 90) ? byte + 32 : byte
         }
@@ -998,6 +1037,10 @@ enum FuzzyMatcher {
             return max(0, score + haystack.count / 12)
         }
     }
+
+    /// What `Query.rank` adds to a row that is not a word-prefix match. Far above any
+    /// fuzzy score or frecency discount, so the two tiers never interleave.
+    static let tierSpan = 1 << 20
 
     /// Convenience for a one-off comparison. Anything matching a query against more
     /// than one candidate should build a `Query` once and reuse it.

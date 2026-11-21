@@ -60,3 +60,20 @@ private func referenceScore(_ query: String, in candidate: String) -> Int? {
     #expect(FuzzyMatcher.Query("").isEmpty)
     #expect(FuzzyMatcher.Query("").score(in: "anything") == 0)
 }
+
+@Test func wordPrefixMatchesAreTheirOwnTier() {
+    #expect(FuzzyMatcher.Query("dia").startsWords(in: "Dia  company.thebrowser.dia"))
+    #expect(FuzzyMatcher.Query("vs code").startsWords(in: "Visual Studio Code com.microsoft.VSCode"))
+    #expect(FuzzyMatcher.Query("sys set").startsWords(in: "System Settings"))
+    #expect(FuzzyMatcher.Query("café").startsWords(in: "Le Café Münster"))
+    #expect(FuzzyMatcher.Query("").startsWords(in: "anything"))
+    // A substring inside a word, and letters strung across words, are not.
+    #expect(!FuzzyMatcher.Query("dia").startsWords(in: "Obsidian md.obsidian"))
+    #expect(!FuzzyMatcher.Query("dia").startsWords(in: "Clipboard clipboard clip history"))
+
+    // The tier sits above any frecency discount: a heavily used scattered match still
+    // ranks behind an unused word-prefix one, and within a tier the discount still counts.
+    let needle = FuzzyMatcher.Query("dia")
+    #expect(needle.rank(in: "Dia")! < needle.rank(in: "Clipboard clipboard clip history", bonus: 10_000)!)
+    #expect(needle.rank(in: "Dia Browser", bonus: 50)! < needle.rank(in: "Dia")!)
+}
