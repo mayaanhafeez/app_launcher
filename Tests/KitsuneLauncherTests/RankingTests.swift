@@ -160,6 +160,15 @@ private func rankingController() -> MenuController {
     let top = index.results(for: "dia", limit: 1) { $0 == obsidian ? 60 : 0 }
     #expect(top.map(\.label) == ["Dia"])
 
+    // …while a word-prefix match is still discounted there: used often, "Dia Browser"
+    // displaces the unused "Dia" at the same limit.
+    try kitsuneMakeApp("Dia Browser", in: root)
+    index.refresh()
+    #expect(await kitsuneWaitForApps(index) { $0.count == 3 })
+    let browser = root.appendingPathComponent("Dia Browser.app").path
+    let used = index.results(for: "dia", limit: 1) { $0 == browser ? 60 : 0 }
+    #expect(used.map(\.label) == ["Dia Browser"])
+
     let controller = MenuController(appIndex: index, runtime: LuaRuntime())
     // "dia" matches Clipboard only as d…i…a strung across its label and aliases.
     var clipboard = MenuNode(id: "clipboard", parent: "root", kind: .menu, label: "Clipboard", detail: "", symbol: "", provider: nil, actionReference: nil, scriptAction: nil, order: 1)
@@ -174,5 +183,16 @@ private func rankingController() -> MenuController {
     controller.onRows = { _, rows in labels = rows.map(\.label) }
     controller.open()
     controller.update(query: "dia")
-    #expect(labels == ["Dia", "Obsidian", "Clipboard"])
+    #expect(labels == ["Dia", "Dia Browser", "Obsidian", "Clipboard"])
+}
+
+@MainActor
+@Test func anAbsurdWeightIsClampedRatherThanTrapping() {
+    let store = UsageStore(url: nil)
+    store.spec.weight = 1e300
+    store.record("a")
+    #expect(store.bonus(for: "a") == UsageStore.bonusCeiling)
+    store.spec.weight = .infinity
+    // Fully decayed: infinity times zero is NaN, which must read as no bonus.
+    #expect(store.bonus(for: "a", now: Date().addingTimeInterval(store.spec.halfLife * 2000)) == 0)
 }

@@ -73,6 +73,10 @@ private func referenceScore(_ query: String, in candidate: String) -> Int? {
     // In order, and one word per query word: `set` here is only inside `Reset`.
     #expect(!FuzzyMatcher.Query("net set").startsWords(in: "Settings Network Reset"))
     #expect(!FuzzyMatcher.Query("new new").startsWords(in: "New Menu"))
+    // A query word is matched whole, separators included: "wi-fi" is not "Wi" then
+    // "Fi…" wherever they happen to start.
+    #expect(!FuzzyMatcher.Query("wi-fi").startsWords(in: "Wi Finder - Profile  profile"))
+    #expect(FuzzyMatcher.Query("ünï").startsWords(in: "Ünïcödé"))
 }
 
 @Test func frecencyOnlyDiscountsAMatchThatStartsWords() {
