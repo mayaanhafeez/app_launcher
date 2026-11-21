@@ -171,8 +171,8 @@ final class AppIndex: NSObject {
         // Folded once for the whole index rather than once per app.
         let needle = FuzzyMatcher.Query(query)
         let matches = entries.compactMap { entry -> (entry: AppEntry, score: Int)? in
-            guard let score = needle.score(in: entry.searchText) else { return nil }
-            return (entry, score - bonus(entry.path))
+            guard let score = needle.rank(in: entry.searchText, bonus: { bonus(entry.path) }) else { return nil }
+            return (entry, score)
         }.sorted {
             $0.score == $1.score
                 ? $0.entry.name.localizedCaseInsensitiveCompare($1.entry.name) == .orderedAscending

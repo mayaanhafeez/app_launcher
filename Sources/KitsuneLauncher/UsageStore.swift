@@ -59,8 +59,16 @@ final class UsageStore {
         guard spec.enabled, spec.weight > 0, let record = records[id] else { return 0 }
         let age = max(0, now.timeIntervalSince(record.lastUsed))
         let decay = pow(0.5, age / max(1, spec.halfLife))
-        return Int((spec.weight * decay * log2(Double(record.count) + 1)).rounded())
+        // Clamped so an absurd `ranking.weight` cannot trap the conversion to `Int`, or
+        // overflow the subtraction from a fuzzy score that follows it. An infinite
+        // weight times a fully decayed record is NaN, and a corrupt `count` below zero
+        // takes `log2` to -infinity; neither is a bonus.
+        let bonus = (spec.weight * decay * log2(Double(record.count) + 1)).rounded()
+        guard bonus > 0 else { return 0 }
+        return bonus < Double(Self.bonusCeiling) ? Int(bonus) : Self.bonusCeiling
     }
+
+    static let bonusCeiling = 1 << 40
 
     func reset() {
         records = [:]
