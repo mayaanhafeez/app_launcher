@@ -149,9 +149,16 @@ private func rankingController() -> MenuController {
     let root = kitsuneTemporaryDirectory("kitsune-apps-dia")
     defer { kitsuneRemove(root) }
     try kitsuneMakeApp("Dia", in: root)
+    try kitsuneMakeApp("Obsidian", in: root)
     let index = AppIndex(baseRoots: [root], watchDebounce: 3600)
     index.refresh()
-    #expect(await kitsuneWaitForApps(index) { $0 == ["Dia"] })
+    #expect(await kitsuneWaitForApps(index) { Set($0) == ["Dia", "Obsidian"] })
+
+    // Inside the index, too: it sorts and truncates itself, so a heavily used
+    // Obsidian ("dia" mid-word) must not cut Dia at a limit of one.
+    let obsidian = root.appendingPathComponent("Obsidian.app").path
+    let top = index.results(for: "dia", limit: 1) { $0 == obsidian ? 60 : 0 }
+    #expect(top.map(\.label) == ["Dia"])
 
     let controller = MenuController(appIndex: index, runtime: LuaRuntime())
     // "dia" matches Clipboard only as d…i…a strung across its label and aliases.
@@ -162,9 +169,10 @@ private func rankingController() -> MenuController {
         clipboard,
     ]
     for _ in 0..<30 { controller.usage.record("clipboard") }
+    for _ in 0..<30 { controller.usage.record("app:\(obsidian)") }
     var labels: [String] = []
     controller.onRows = { _, rows in labels = rows.map(\.label) }
     controller.open()
     controller.update(query: "dia")
-    #expect(labels == ["Dia", "Clipboard"])
+    #expect(labels == ["Dia", "Obsidian", "Clipboard"])
 }

@@ -391,7 +391,7 @@ final class MenuController {
             // noise on it.
             if node.keep { return row(node.order, node.detail, "keep") }
             guard let score = needle.rank(in: node.searchText(includingDetail: search.matchDetail),
-                                          bonus: usage.bonus(for: node.id)) else { return nil }
+                                          bonus: { usage.bonus(for: node.id) }) else { return nil }
             return row(score, path(for: node),
                        node.parent == menu ? "current" : "drilldown")
         })
