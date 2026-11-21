@@ -60,3 +60,37 @@ private func referenceScore(_ query: String, in candidate: String) -> Int? {
     #expect(FuzzyMatcher.Query("").isEmpty)
     #expect(FuzzyMatcher.Query("").score(in: "anything") == 0)
 }
+
+@Test func startsWordsNeedsEachQueryWordToBeginAWordInOrder() {
+    #expect(FuzzyMatcher.Query("dia").startsWords(in: "Dia  company.thebrowser.dia"))
+    #expect(FuzzyMatcher.Query("sys set").startsWords(in: "System Settings"))
+    #expect(FuzzyMatcher.Query("wi-fi").startsWords(in: "Wi-Fi  wifi"))
+    #expect(FuzzyMatcher.Query("café").startsWords(in: "Le Café Münster"))
+    #expect(FuzzyMatcher.Query("").startsWords(in: "anything"))
+    // A substring inside a word, and letters strung across words, are not.
+    #expect(!FuzzyMatcher.Query("dia").startsWords(in: "Obsidian md.obsidian"))
+    #expect(!FuzzyMatcher.Query("dia").startsWords(in: "Clipboard clipboard clip history"))
+    // In order, and one word per query word: `set` here is only inside `Reset`.
+    #expect(!FuzzyMatcher.Query("net set").startsWords(in: "Settings Network Reset"))
+    #expect(!FuzzyMatcher.Query("new new").startsWords(in: "New Menu"))
+    // A query word is matched whole, separators included: "wi-fi" is not "Wi" then
+    // "Fi…" wherever they happen to start.
+    #expect(!FuzzyMatcher.Query("wi-fi").startsWords(in: "Wi Finder - Profile  profile"))
+    #expect(FuzzyMatcher.Query("ünï").startsWords(in: "Ünïcödé"))
+}
+
+@Test func frecencyOnlyDiscountsAMatchThatStartsWords() {
+    let needle = FuzzyMatcher.Query("dia")
+    // No usage: exactly the fuzzy score, whatever the match shape.
+    #expect(needle.rank(in: "Xdiax") { 0 } == needle.score(in: "Xdiax"))
+    // A strung match is never discounted, at any weight.
+    let strung = "Clipboard clipboard clip history"
+    #expect(needle.rank(in: strung) { 10_000_000 } == needle.score(in: strung))
+    #expect(needle.rank(in: "Dia") { 0 }! < needle.rank(in: strung) { 10_000_000 }!)
+    // A word-prefix match still is, and that is what lets frecency reorder them.
+    #expect(needle.rank(in: "Dia Browser") { 50 }! < needle.rank(in: "Dia") { 0 }!)
+    // The bonus is not even asked for on a miss.
+    var asked = false
+    #expect(needle.rank(in: "zzz") { asked = true; return 1 } == nil)
+    #expect(!asked)
+}

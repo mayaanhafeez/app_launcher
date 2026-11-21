@@ -951,17 +951,39 @@ enum FuzzyMatcher {
         /// entirely; anything else still goes through the general path below.
         fileprivate let ascii: [UInt8]?
         fileprivate let characters: [Character]
+        /// The query's whitespace-separated words, split once here rather than once
+        /// per candidate. Only `startsWords` reads them.
+        private let asciiWords: [[UInt8]]
+        private let characterWords: [[Character]]
 
         init(_ query: String) {
             let folded = query.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
             characters = Array(folded)
+            characterWords = characters.split(whereSeparator: \.isWhitespace).map(Array.init)
             let bytes = Array(folded.utf8)
             ascii = bytes.allSatisfy { $0 < 0x80 } ? bytes : nil
+            asciiWords = ascii?.split(whereSeparator: { $0 == 32 || $0 == 9 }).map(Array.init) ?? []
         }
 
         var isEmpty: Bool { characters.isEmpty }
 
         func score(in candidate: String) -> Int? {
+            rank(in: candidate) { 0 }
+        }
+
+        /// The score a row is *ranked* by: the fuzzy score, discounted by frecency
+        /// only when the query's words start words of the candidate (`startsWords`).
+        ///
+        /// The discount grows with the log of the use count and is unbounded against
+        /// match quality, while a fuzzy score only separates a clean hit from a
+        /// letter-strung one by a few dozen points. Applied to every match, "dia" put
+        /// the Clipboard menu — opened often, and matched by `d`…`i`…`a` strung across
+        /// "clipboard … clip history" — above the Dia app whose name *is* the query.
+        /// Gating the discount rather than adding a tier to every score keeps a row
+        /// with no usage ranked exactly as the fuzzy score says, and no weight can lift
+        /// a strung match. `bonus` is a closure so neither it nor the word check runs
+        /// for a candidate that did not match, and the candidate is folded once for both.
+        func rank(in candidate: String, bonus: () -> Int) -> Int? {
             if isEmpty { return 0 }
             // Both sides must be ASCII to take the byte path: folding a non-ASCII
             // candidate can change its length and its content, and only the general
@@ -969,11 +991,58 @@ enum FuzzyMatcher {
             if let needle = ascii {
                 let bytes = Array(candidate.utf8)
                 if bytes.allSatisfy({ $0 < 0x80 }) {
-                    return Self.match(needle, bytes.map(Self.lowercased)) { $0 == 32 || $0 == 47 || $0 == 46 || $0 == 95 || $0 == 45 }
+                    return Self.rank(needle, asciiWords, bytes.map(Self.lowercased), bonus: bonus, isBoundary: Self.isByteBoundary)
                 }
             }
             let folded = Array(candidate.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current))
-            return Self.match(characters, folded) { " /._-".contains($0) }
+            return Self.rank(characters, characterWords, folded, bonus: bonus, isBoundary: Self.isCharacterBoundary)
+        }
+
+        /// True when each of the query's words appears *whole* at the start of a word
+        /// of `candidate`, in order and without overlapping — "dia" in "Dia", "sys set"
+        /// in "System Settings", "wi-fi" in "Wi-Fi" but not in "Wi Finder - Profile".
+        /// A word of the query is matched as one contiguous run, separators and all,
+        /// so this can only approve text the candidate actually contains.
+        func startsWords(in candidate: String) -> Bool {
+            if isEmpty { return true }
+            if ascii != nil {
+                let bytes = Array(candidate.utf8)
+                if bytes.allSatisfy({ $0 < 0x80 }) {
+                    return Self.startsWords(asciiWords, bytes.map(Self.lowercased), isBoundary: Self.isByteBoundary)
+                }
+            }
+            let folded = Array(candidate.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current))
+            return Self.startsWords(characterWords, folded, isBoundary: Self.isCharacterBoundary)
+        }
+
+        private static func isByteBoundary(_ byte: UInt8) -> Bool {
+            byte == 32 || byte == 47 || byte == 46 || byte == 95 || byte == 45
+        }
+
+        private static func isCharacterBoundary(_ character: Character) -> Bool {
+            " /._-".contains(character)
+        }
+
+        private static func rank<Element: Equatable>(_ needle: [Element], _ words: [[Element]], _ haystack: [Element],
+                                                      bonus: () -> Int, isBoundary: (Element) -> Bool) -> Int? {
+            guard let base = match(needle, haystack, isBoundary: isBoundary) else { return nil }
+            let discount = bonus()
+            guard discount != 0, startsWords(words, haystack, isBoundary: isBoundary) else { return base }
+            return base - discount
+        }
+
+        /// Greedy is exact here: taking the earliest place each word can start ends it
+        /// earliest too, which never leaves less room for the words after it.
+        private static func startsWords<Element: Equatable>(_ words: [[Element]], _ haystack: [Element],
+                                                             isBoundary: (Element) -> Bool) -> Bool {
+            var from = 0
+            for word in words {
+                guard let start = (from..<max(from, haystack.count)).first(where: { index in
+                    (index == 0 || isBoundary(haystack[index - 1])) && haystack[index...].starts(with: word)
+                }) else { return false }
+                from = start + word.count
+            }
+            return true
         }
 
         private static func lowercased(_ byte: UInt8) -> UInt8 {
