@@ -61,9 +61,10 @@ final class UsageStore {
         let decay = pow(0.5, age / max(1, spec.halfLife))
         // Clamped so an absurd `ranking.weight` cannot trap the conversion to `Int`, or
         // overflow the subtraction from a fuzzy score that follows it. An infinite
-        // weight times a fully decayed record is NaN, which counts as no bonus.
+        // weight times a fully decayed record is NaN, and a corrupt `count` below zero
+        // takes `log2` to -infinity; neither is a bonus.
         let bonus = (spec.weight * decay * log2(Double(record.count) + 1)).rounded()
-        if bonus.isNaN { return 0 }
+        guard bonus > 0 else { return 0 }
         return bonus < Double(Self.bonusCeiling) ? Int(bonus) : Self.bonusCeiling
     }
 
