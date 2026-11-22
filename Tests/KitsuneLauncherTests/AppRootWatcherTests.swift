@@ -198,6 +198,27 @@ private func relevant(_ path: String, depth: Int = 3, flags: Int = 0) -> Bool {
     #expect(AppIndex.appPaths(in: [root], depth: 3) == [link.path])
 }
 
+@Test func aDotFileDoesNotHideTheFolderListedAfterIt() throws {
+    let root = kitsuneTemporaryDirectory("kitsune-apps")
+    defer { kitsuneRemove(root) }
+    // `~/Applications`: an empty `.localized` file listed just before `Chrome
+    // Apps.localized`. `skipDescendants()` on a file stays pending and lands on the next
+    // directory, so that folder — every Chrome app — was never entered. Listing order
+    // is the filesystem's, so many dot-files among many folders make "one of them is
+    // listed right before a folder" all but certain.
+    var expected: [String] = []
+    for index in 0..<12 {
+        let folder = root.appendingPathComponent("Folder \(index)")
+        try makeApp("App \(index)", in: folder)
+        expected.append(folder.appendingPathComponent("App \(index).app").path)
+    }
+    for name in [".DS_Store", ".localized"] + (0..<40).map({ ".dot\($0)" }) {
+        FileManager.default.createFile(atPath: root.appendingPathComponent(name).path, contents: Data())
+    }
+
+    #expect(AppIndex.appPaths(in: [root], depth: 3) == expected.sorted())
+}
+
 @Test func appsUnderASymlinkedRootKeepThePathTheConfigWrote() throws {
     let parent = kitsuneTemporaryDirectory("kitsune-apps")
     defer { kitsuneRemove(parent) }

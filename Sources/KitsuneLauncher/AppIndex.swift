@@ -146,8 +146,15 @@ final class AppIndex: NSObject {
                 // `.skipsHiddenFiles` also skips the BSD `hidden` flag, which macOS sets
                 // on `/Applications/Safari.app` — a link into the system Cryptex that
                 // Finder still lists — so Safari was missing from the index.
+                //
+                // Only a dot-*directory* is skipped. `skipDescendants()` after a plain
+                // file stays pending and lands on the next directory listed, and listing
+                // order is the filesystem's: the empty `~/Applications/.localized` sits
+                // right before `Chrome Apps.localized`, which hid every Chrome app.
                 if url.lastPathComponent.hasPrefix(".") {
-                    enumerator.skipDescendants()
+                    if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+                        enumerator.skipDescendants()
+                    }
                     continue
                 }
                 if url.pathExtension.lowercased() == "app" {
