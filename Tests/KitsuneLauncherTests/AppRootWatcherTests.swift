@@ -198,23 +198,35 @@ private func relevant(_ path: String, depth: Int = 3, flags: Int = 0) -> Bool {
     #expect(AppIndex.appPaths(in: [root], depth: 3) == [link.path])
 }
 
-@Test func aDotFileDoesNotHideTheFolderListedAfterIt() throws {
-    let root = kitsuneTemporaryDirectory("kitsune-apps")
-    defer { kitsuneRemove(root) }
+@Test func aNonDirectoryDoesNotHideTheFolderListedAfterIt() throws {
+    let parent = kitsuneTemporaryDirectory("kitsune-apps")
+    defer { kitsuneRemove(parent) }
+    let root = parent.appendingPathComponent("Applications")
     // `~/Applications`: an empty `.localized` file listed just before `Chrome
-    // Apps.localized`. `skipDescendants()` on a file stays pending and lands on the next
-    // directory, so that folder — every Chrome app — was never entered. Listing order
-    // is the filesystem's, so many dot-files among many folders make "one of them is
-    // listed right before a folder" all but certain.
+    // Apps.localized`. `skipDescendants()` on anything but a directory stays pending
+    // and lands on the next directory, so that folder — every Chrome app — was never
+    // entered. Dot-files are one trigger; a Safari-style `.app` symlink is another.
     var expected: [String] = []
     for index in 0..<12 {
         let folder = root.appendingPathComponent("Folder \(index)")
         try makeApp("App \(index)", in: folder)
         expected.append(folder.appendingPathComponent("App \(index).app").path)
     }
-    for name in [".DS_Store", ".localized"] + (0..<40).map({ ".dot\($0)" }) {
+    try makeApp("Target", in: parent.appendingPathComponent("Elsewhere"))
+    for index in 0..<10 {
+        let link = root.appendingPathComponent("Link \(index).app")
+        try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: "../Elsewhere/Target.app")
+        expected.append(link.path)
+    }
+    for name in [".DS_Store", ".localized"] + (0..<30).map({ ".dot\($0)" }) {
         FileManager.default.createFile(atPath: root.appendingPathComponent(name).path, contents: Data())
     }
+
+    // Listing order is the filesystem's, so check the fixture really does list a
+    // non-directory right before a folder — otherwise this would pass on the bug too.
+    let listed = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey])
+    let isFolder = listed.map { $0.lastPathComponent.hasPrefix("Folder ") }
+    #expect(zip(isFolder, isFolder.dropFirst()).contains { !$0 && $1 }, "fixture never lists a non-directory before a folder")
 
     #expect(AppIndex.appPaths(in: [root], depth: 3) == expected.sorted())
 }
