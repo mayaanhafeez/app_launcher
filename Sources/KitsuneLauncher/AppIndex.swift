@@ -142,21 +142,29 @@ final class AppIndex: NSObject {
                 options: [.skipsPackageDescendants]
             ) else { continue }
             for case let url as URL in enumerator {
+                // `skipDescendants()` is only ever called on a directory. After anything
+                // else it stays pending and lands on the next directory listed — and
+                // listing order is the filesystem's: the empty `~/Applications/.localized`
+                // sits right before `Chrome Apps.localized`, which hid every Chrome app.
+                // A symlink is not a directory here (it is not followed), and
+                // `/Applications/Safari.app` is one.
+                let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
+                let skip = { if isDirectory { enumerator.skipDescendants() } }
                 // Dot-files only, the same rule `AppRootWatcher.isRelevant` applies.
                 // `.skipsHiddenFiles` also skips the BSD `hidden` flag, which macOS sets
                 // on `/Applications/Safari.app` — a link into the system Cryptex that
                 // Finder still lists — so Safari was missing from the index.
                 if url.lastPathComponent.hasPrefix(".") {
-                    enumerator.skipDescendants()
+                    skip()
                     continue
                 }
                 if url.pathExtension.lowercased() == "app" {
                     let path = url.path.hasPrefix(real + "/")
                         ? written + url.path.dropFirst(real.count) : url.path
                     if isTopLevelApplication(path) { paths.insert(path) }
-                    enumerator.skipDescendants()
+                    skip()
                 } else if enumerator.level >= depth {
-                    enumerator.skipDescendants()
+                    skip()
                 }
             }
         }

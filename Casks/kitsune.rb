@@ -12,8 +12,8 @@
 # release and rewrites both lines here (scripts/bump-cask.sh) on main — that commit
 # is what `brew upgrade` picks up.
 cask "kitsune" do
-  version "0.9.1"
-  sha256 "49bcea3b3508c2859634ff9c00fef443be6287b92b5d4a36bd5eccd0cd220a96"
+  version "0.9.2"
+  sha256 "ecc9c597511fbe4602d6911fc359b592912caaff8a5367d5c56b21085b8a5eed"
 
   url "https://github.com/mayaanhafeez/app_launcher/releases/download/v#{version}/KitsuneLauncher-v#{version}-macos.zip"
   name "KitsuneLauncher"

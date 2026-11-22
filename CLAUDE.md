@@ -239,7 +239,9 @@ user root like `~/dev` can be enormous; 3 covers every built-in root, down to `~
 Packages are returned but never descended into, so an app's bundled helper apps stay out of the list.
 "Hidden" means a dot-prefixed name, checked by hand rather than with `.skipsHiddenFiles`: that option also skips the
 BSD `hidden` flag, which macOS sets on `/Applications/Safari.app` (a link into the system Cryptex), and Safari silently
-dropped out of the index.
+dropped out of the index. `skipDescendants()` is only ever called on a directory: called after a file — or a symlink,
+which the walk does not follow, and Safari is one — it stays pending and lands on the next directory listed. The empty
+`~/Applications/.localized` is listed right before `Chrome Apps.localized`, so every Chrome app vanished.
 The walk runs over each root's **real** path and reports under the root as written: the enumerator lists nothing at all
 for a root that is itself a symlink, and real paths for one beneath a link. A `.app` without a parseable
 `Contents/Info.plist` is not an entry (`makeEntry` returns nil) — a drag install is caught mid-copy by the watcher, and
